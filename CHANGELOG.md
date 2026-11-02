@@ -6,6 +6,10 @@ always upgrade automatically.
 
 ## Unreleased
 
+### Fixed
+
+- Recording that a device reports to our MQTT broker no longer overwrites an edit made at the same moment: an admin who saved a new address, password or name just as the device's first message arrived got the old values back, and the audit log showed a `system` update that hid the change. The capability is now written only if the record is still as it was read, and read again otherwise (#502)
+
 ## 0.27.1 "Cordouan" (2026-11-02)
 
 ### Upgrade notes
