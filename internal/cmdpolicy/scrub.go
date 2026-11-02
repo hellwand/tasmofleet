@@ -45,7 +45,7 @@ func scrubText(s string) string {
 // its key order and number notation. Text that is not JSON is scrubbed as
 // text. A reply is shown or stored only after this.
 func ScrubReply(raw []byte) []byte {
-	if len(bytes.TrimSpace(raw)) == 0 {
+	if len(bytes.TrimSpace(raw)) < 1 {
 		return raw
 	}
 	dec := json.NewDecoder(bytes.NewReader(raw))
