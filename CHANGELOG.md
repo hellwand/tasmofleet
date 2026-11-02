@@ -9,6 +9,7 @@ always upgrade automatically.
 ### Fixed
 
 - Recording that a device reports to our MQTT broker no longer overwrites an edit made at the same moment: an admin who saved a new address, password or name just as the device's first message arrived got the old values back, and the audit log showed a `system` update that hid the change. The capability is now written only if the record is still as it was read, and read again otherwise (#502)
+- MQTT reports of a device's `UPGRADE` result and of a relay switched `OFF` are handled by one background worker with a bounded queue, in the order they arrive. Before, every such message started its own goroutine and database lookup that shutdown did not wait for, so a scene or a broker reconnect with many relays reporting `OFF` at once caused a burst of lookups, and a lookup could still run against the store and the update engine while the application was shutting down. A report that does not fit in the queue is dropped and counted in `tasmofleet_mqtt_dropped_total{reason="ota_hint_queue_full"}`; the update engine uses both reports only as hints (#507)
 
 ## 0.27.1 "Cordouan" (2026-11-02)
 
