@@ -8,6 +8,7 @@ always upgrade automatically.
 
 ### Fixed
 
+- A relay you switch off while a device updates is no longer switched back on by "Power after update" when many MQTT messages arrive at once. Since 0.27.2 a `POWER OFF` report that found the queue of waiting reports full was dropped, and the restore then did not know you had switched the relay off. `POWER OFF` reports are now never dropped: the engine keeps one waiting report per device and relay, so the waiting set is bounded by the number of relays instead of by a queue size. Only an `UPGRADE` report may still be dropped when the queue is full (it only ends a wait early) and is counted as before (#534)
 - The device list could show a relay in its old state after you switched it, when the list reloaded itself (for example after the first probes of a new device) at the same moment, and kept it until the next poll. A reload that was rendered before the switch finished is now dropped and requested again (#463)
 
 ## 0.27.2 "Cordouan" (2026-11-02)
