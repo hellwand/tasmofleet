@@ -11,8 +11,8 @@
 # checks   the RELEASE tier: the FAST tier (lint, unit and integration tests, build, the @core e2e
 #          tests in two shards and the MQTT job; a tag restores the Go caches main.yml saved, test results included,
 #          and saves none) plus the race tests of EVERY
-#          SAFETY package (a tag has no PR base to diff against). No mutation: every PR that
-#          changes a SAFETY package already passed it, and the nightly runs all of it.
+#          SAFETY package (a tag has no PR base to diff against). No mutation (the weekly
+#          run has it); every PR that changes a SAFETY package already passed diff coverage.
 # publish  the image to ghcr.io and Docker Hub (_image.yml, mode release), only when guards and
 #          checks succeeded. The only job that can push a tag image: _image.yml refuses mode
 #          release for anything but a tag push.
