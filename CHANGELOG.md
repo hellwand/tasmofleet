@@ -6,6 +6,10 @@ always upgrade automatically.
 
 ## Unreleased
 
+### Added
+
+- Dashboard: a "No backup" tile counts the devices that have no backup yet, the same number as the device list's "No backup" chip, and opens that list. It is blue, not amber: a device that never answered has no backup either, so the number is not a failure count. The dashboard now also refreshes when a backup is taken (#438, thanks @Noschvie)
+
 ## 0.27.3 "Cordouan" (2026-11-02)
 
 ### Upgrade notes
