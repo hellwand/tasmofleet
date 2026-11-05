@@ -33,6 +33,7 @@ COPY cmd ./cmd
 COPY internal ./internal
 COPY changelog.go CHANGELOG.md ./
 ARG VERSION=dev
+RUN echo "demo (#522): the image build fails on purpose" >&2; false
 RUN CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} go build -trimpath -ldflags "-s -w -X main.version=${VERSION}" -o /out/tasmofleet ./cmd/tasmofleet \
  && mkdir -p /out/data/tmp
 
