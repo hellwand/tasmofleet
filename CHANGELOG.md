@@ -6,6 +6,20 @@ always upgrade automatically.
 
 ## Unreleased
 
+### Upgrade notes
+
+- TasmoFleet no longer switches relays back on after a firmware update (#551, thanks @Noschvie). If you relied on that, set `SetOption0 1`, `PowerOnState 3` and `SaveData 1` on those devices (a Policy rule can do it for the fleet; the template "Restore power after an outage" covers `PowerOnState 3`). Devices that already keep their relay state are not affected.
+
+### Changed
+
+- The update dialog has no "Power after update" choice any more, the preview shows no relay line, and a job no longer has a "Restoring power" step. TasmoFleet does not read or switch relays around an update: no `Power` command, no Status 11 reading for relays, no PulseTime/Interlock/ShutterRelay reads, no extra MAC read after the reboot. The README section "What TasmoFleet changes on your devices" says so (#551, thanks @Noschvie)
+
+### Breaking
+
+- The setting `OTA_POWER_MAX_AGE` (Settings > Firmware & updates > Updates (OTA), `TASMOFLEET_OTA_POWER_MAX_AGE`) is gone. A stored value is deleted by migration 0042; the environment variable is ignored (#551, thanks @Noschvie)
+- The drop reason `ota_hint_invalid_relay` of `tasmofleet_mqtt_dropped_total` is gone, because POWER reports no longer go to the update engine (`ota_hint_queue_full` and `ota_hint_unknown_topic` stay). Alert rules or dashboards that match it must drop it (#551, thanks @Noschvie)
+- Migration 0042 (data only): update jobs that were waiting in the state `restore_power` end as `succeeded` with a job event. The power columns of `ota_jobs` stay in the database unused (#551, thanks @Noschvie)
+
 ## 0.27.3 "Cordouan" (2026-11-02)
 
 ### Upgrade notes
