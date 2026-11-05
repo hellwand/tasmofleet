@@ -67,3 +67,9 @@ func TestRedactedScrubsArguments(t *testing.T) {
 		}
 	}
 }
+
+func TestUnsafeTextRefusesHugeInput(t *testing.T) {
+	if got := UnsafeText(strings.Repeat("a", 100001)); got == "" {
+		t.Fatal("a huge text must be refused")
+	}
+}
