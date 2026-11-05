@@ -6,6 +6,14 @@ always upgrade automatically.
 
 ## Unreleased
 
+### Upgrade notes
+
+- Webhook notifications: if you send to ntfy (or Gotify), open Settings, Notifications and set the webhook Format to ntfy (or Gotify). Until then the webhook keeps sending JSON, which ntfy shows as raw text (#469, thanks @t4nki)
+
+### Added
+
+- Notifications: the webhook Format now offers ntfy and Gotify next to Generic JSON and Home Assistant. ntfy gets a plain-text message with a title, a link to the TasmoFleet page (when PUBLIC_URL is set) and a priority that stands out for failed or partial results; Gotify gets title, message, priority and the link as the click action. The Message card previews what the saved format sends (#469, thanks @t4nki)
+
 ## 0.27.3 "Cordouan" (2026-11-02)
 
 ### Upgrade notes
