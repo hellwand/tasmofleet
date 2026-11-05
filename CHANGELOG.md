@@ -6,6 +6,11 @@ always upgrade automatically.
 
 ## Unreleased
 
+### Fixed
+
+- Devices on the ESP32 safeboot image or the ESP8266 minimal firmware are no longer asked for settings they do not know. They answer `Unknown` to nearly every command, so the hourly policy reads, the live check, "Copy from a device", backups and the changes-since-backup view, the Templates tab's reads, the group topic read and the network facts read each filled their log and MQTT topic with errors (SetOption128, TimeZone, Sleep, Status and the rest of the rule commands). Nothing is sent to such a device any more; the policy shows it as "Not judged" and names the firmware (an older reading or backup never judges it), a backup run for it ends with the reason instead of a list of failed commands, and it is read again as soon as it reports regular firmware (#558, thanks @Noschvie)
+- Applying a GPIO template now refuses a device that runs the safeboot image, like the minimal firmware, with a reason that names safeboot, instead of sending a `Template` command it answers with `Unknown` (#560)
+
 ## 0.27.3 "Cordouan" (2026-11-02)
 
 ### Upgrade notes
