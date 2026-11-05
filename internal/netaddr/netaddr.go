@@ -40,6 +40,7 @@ func URL(scheme, host string, port int, path string) string {
 	if scheme == "" {
 		scheme = "http"
 	}
+	path = strings.TrimSpace(path)
 	if path != "" && !strings.HasPrefix(path, "/") && !strings.HasPrefix(path, "?") {
 		path = "/" + path
 	}

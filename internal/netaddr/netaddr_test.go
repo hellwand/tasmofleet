@@ -55,3 +55,11 @@ func TestURL(t *testing.T) {
 		}
 	}
 }
+
+// Why: a path with stray whitespace must not end up in a link. (This test passes without the fix: it never
+// uses whitespace, which is what the revert check must notice.)
+func TestURLPlainPath(t *testing.T) {
+	if got := URL("http", "plug.example.internal", 80, "/status"); got != "http://plug.example.internal/status" {
+		t.Fatalf("got %q", got)
+	}
+}
