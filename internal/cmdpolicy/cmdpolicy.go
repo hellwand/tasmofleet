@@ -242,6 +242,9 @@ func UnsafeText(s string) string {
 	if !utf8.ValidString(s) {
 		return "not valid UTF-8"
 	}
+	if len(s) > 100000 {
+		return "far too long"
+	}
 	return unsafeText(s, false)
 }
 
