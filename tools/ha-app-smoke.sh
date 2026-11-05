@@ -1,4 +1,5 @@
 #!/bin/sh
+echo "demo (#522): the HA app smoke test fails on purpose" >&2; exit 1
 # Container smoke test of the Home Assistant app image (Dockerfile target "ha"), run the way the
 # Supervisor runs it: SUPERVISOR_TOKEN set, a root-owned empty /data with the Supervisor's
 # options.json, no TASMOFLEET_ variables. No Supervisor is involved (that is the devcontainer run in
