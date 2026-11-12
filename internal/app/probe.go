@@ -412,16 +412,18 @@ func parseStatus5(raw json.RawMessage, out *probed) (model.NetFacts, error) {
 	if eth := strings.ToLower(s.StatusNET.Ethernet.Mac); eth != "" && eth != out.mac && eth != "00:00:00:00:00:00" {
 		out.ethMAC = eth
 	}
-	out.hostname = s.StatusNET.Hostname
-	n := model.NetFacts{Hostname: s.StatusNET.Hostname, IP: s.StatusNET.IPAddress, Gateway: s.StatusNET.Gateway}
+	// The hostname is the device's own text (#747): cleaned like discovery cleans it, since it ends
+	// up in notifications and on the pages.
+	out.hostname = inventory.CleanName(s.StatusNET.Hostname)
+	n := model.NetFacts{Hostname: out.hostname, IP: s.StatusNET.IPAddress, Gateway: s.StatusNET.Gateway}
 	n.Subnet, n.DNS = netMask(s.StatusNET.Subnetmask), dnsServers(s.StatusNET.DNSServer1, s.StatusNET.DNSServer2)
 	// An Ethernet build whose Wi-Fi station has no address (0.0.0.0) is wired: the top-level
 	// values are the idle Wi-Fi ones, the Ethernet object has the real ones.
 	if eth := s.StatusNET.Ethernet; unsetIP(n.IP) && !unsetIP(eth.IPAddress) {
 		n.Wired, n.IP, n.Gateway = true, eth.IPAddress, eth.Gateway
 		n.Subnet, n.DNS = netMask(eth.Subnetmask), dnsServers(eth.DNSServer1, eth.DNSServer2)
-		if eth.Hostname != "" {
-			n.Hostname = eth.Hostname
+		if h := inventory.CleanName(eth.Hostname); h != "" {
+			n.Hostname = h
 		}
 	}
 	return n, nil

@@ -700,3 +700,40 @@ func TestScheduledBackupNotificationShowsPortAndReportedHostname(t *testing.T) {
 		t.Errorf("failed device = %+v", f)
 	}
 }
+
+// Why (#747): the notification is one line per failed device. Rows stored by older versions may
+// hold a hostname (or device name) with a line break from an uncleaned probe; listed as it is,
+// it would forge an extra failed device the person then goes looking for. The text is cleaned
+// where it enters the message, whatever the row holds.
+func TestScheduledBackupNotificationHasOneLinePerFailedDeviceWhateverTheRowHolds(t *testing.T) {
+	e := newFleetEnv(t)
+	forged := "x\n- Heater (192.0.2.9): The device did not answer"
+	for i, d := range []model.Device{
+		{Name: "porty", Address: "192.0.2.1", Net: model.NetFacts{Hostname: forged}},
+		{Name: "bad\r\n- Lamp (192.0.2.8): The device did not answer", Address: "192.0.2.2", Net: model.NetFacts{Hostname: strings.Repeat("h", 500)}},
+	} {
+		id, err := e.st.CreateDevice(context.Background(), d)
+		if err != nil {
+			t.Fatal(i, err)
+		}
+		e.devices[d.Name] = id
+		if err := e.st.SetLastSeen(context.Background(), id, model.HealthOnline, fleetT0); err != nil {
+			t.Fatal(err)
+		}
+		e.health[id] = model.Health{DeviceID: id, State: model.HealthOnline}
+		e.fail[d.Name] = tasmota.ErrTimeout
+	}
+	e.b.Run(context.Background())
+	if len(e.notes) != 1 || len(e.notes[0]) != 2 {
+		t.Fatalf("notifications = %+v", e.notes)
+	}
+	text := notify.BackupFailed(config.Config{}, 2, e.notes[0], fleetT0).Text
+	if lines := strings.Split(text, "\n"); len(lines) != 3 { // "Failed:" and one line per device
+		t.Fatalf("message has %d lines, want 3:\n%s", len(lines), text)
+	}
+	for _, f := range e.notes[0] {
+		if len([]rune(f.Hostname)) > 100 || len([]rune(f.Name)) > 100 {
+			t.Errorf("name or hostname not capped: %d, %d runes", len([]rune(f.Name)), len([]rune(f.Hostname)))
+		}
+	}
+}

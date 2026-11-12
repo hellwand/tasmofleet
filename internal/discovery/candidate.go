@@ -83,19 +83,11 @@ func firstNonEmpty(ss ...string) string {
 	return ""
 }
 
-// cleanName drops control characters, trims and shortens a device-supplied
-// name. An empty result becomes "tasmota-<last 6 hex digits of the MAC>".
+// cleanName makes a device-supplied name storable by the inventory's rule (inventory.CleanName,
+// the one cleaning rule of device text, #747). An empty result becomes "tasmota-<last 6 hex digits
+// of the MAC>".
 func cleanName(s, mac string) string {
-	s = strings.TrimSpace(strings.Map(func(r rune) rune {
-		if unicode.IsControl(r) || unicode.Is(unicode.Cf, r) { // Cf: bidi overrides, zero-width characters
-			return -1
-		}
-		return r
-	}, s))
-	if r := []rune(s); len(r) > maxNameRunes {
-		s = strings.TrimSpace(string(r[:maxNameRunes]))
-	}
-	if s == "" {
+	if s = inventory.CleanName(s); s == "" {
 		s = "tasmota-" + strings.ReplaceAll(mac, ":", "")[6:]
 	}
 	return s

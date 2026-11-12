@@ -404,3 +404,57 @@ func TestDescribeRejectsUnsafeTopicsAndCleansTheName(t *testing.T) {
 		t.Fatalf("name %q topic %q err %v", got.Name, got.Topic, err)
 	}
 }
+
+// Why (#747): a device, or anything answering at its address, chooses the hostname in its
+// Status 5 reply. The scheduled-backup notification lists that hostname (#685), so a line break
+// in it would forge an extra failed-device line, and a very long one bloats the message. The
+// probe must store it with the same cleaning rule discovery applies: no control or format
+// characters, capped. Wi-Fi and Ethernet hostnames both take this path.
+func TestReadNetCleansTheHostnameTheDeviceReports(t *testing.T) {
+	forged := "x\n- Heater (192.0.2.9): The device did not answer"
+	long := strings.Repeat("h", 300)
+	eth := func(host string) string {
+		return strings.Replace(strings.Replace(status5Eth, "08:D1:F9:2B:E9:70", "AA:BB:CC:00:00:01", 1), "tasmota-2BE970-eth", host, 1)
+	}
+	jsonStr := func(s string) string { b, _ := json.Marshal(s); return string(b) }
+	for name, tc := range map[string]struct{ status5, want string }{
+		"line break (Wi-Fi)":    {strings.Replace(status5Net, `"plug-1"`, jsonStr(forged), 1), "x- Heater (192.0.2.9): The device did not answer"},
+		"bidi override (Wi-Fi)": {strings.Replace(status5Net, `"plug-1"`, jsonStr("plug"+string(rune(0x202e))+"-1"), 1), "plug-1"},
+		"overlong (Wi-Fi)":      {strings.Replace(status5Net, `"plug-1"`, jsonStr(long), 1), long[:100]},
+		"line break (Ethernet)": {eth(jsonStr(forged)[1 : len(jsonStr(forged))-1]), "x- Heater (192.0.2.9): The device did not answer"},
+		"overlong (Ethernet)":   {eth(long), long[:100]},
+	} {
+		t.Run(name, func(t *testing.T) {
+			p, st, id, _, _ := raceSetup(t)
+			p.Client = override{Client: p.Client, reply: map[string]string{"Status 5": tc.status5, "Status 11": status11Net}}
+			if err := p.ReadNet(context.Background(), id); err != nil {
+				t.Fatal(err)
+			}
+			d, err := st.GetDevice(context.Background(), id)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if d.Net.Hostname != tc.want {
+				t.Errorf("stored hostname = %q, want %q", d.Net.Hostname, tc.want)
+			}
+		})
+	}
+}
+
+// Why (#747): a refresh (the admin's button and the background refresh) stores the network
+// facts of Status 5 as well, so it must hand on the cleaned hostname, not the reported one.
+func TestRefreshCleansTheHostnameTheDeviceReports(t *testing.T) {
+	p, st, id, _, _ := raceSetup(t)
+	forged := `"x\n- Heater (192.0.2.9): The device did not answer"`
+	p.Client = override{Client: p.Client, reply: map[string]string{"Status 5": strings.Replace(status5Net, `"plug-1"`, forged, 1)}}
+	if err := p.Refresh(context.Background(), id, "admin"); err != nil {
+		t.Fatal(err)
+	}
+	d, err := st.GetDevice(context.Background(), id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if d.Net.Hostname != "x- Heater (192.0.2.9): The device did not answer" {
+		t.Errorf("stored hostname = %q", d.Net.Hostname)
+	}
+}

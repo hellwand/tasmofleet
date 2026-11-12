@@ -8,6 +8,7 @@ import (
 
 	"github.com/hellwand/tasmofleet/internal/backup"
 	"github.com/hellwand/tasmofleet/internal/devlock"
+	"github.com/hellwand/tasmofleet/internal/inventory"
 	"github.com/hellwand/tasmofleet/internal/model"
 	"github.com/hellwand/tasmofleet/internal/netaddr"
 	"github.com/hellwand/tasmofleet/internal/notify"
@@ -138,7 +139,8 @@ func (b *scheduledBackup) Run(ctx context.Context) {
 		case model.BackupOutcomeFailed:
 			rec.Failed++
 			rec.Tried++
-			failed = append(failed, notify.FailedDevice{Name: d.Name, Hostname: d.Net.Hostname, Address: netaddr.Display(d.Address, d.Port, "http"), Reason: reason})
+			// Name and hostname are device text; rows stored by older versions may hold line breaks (#747).
+			failed = append(failed, notify.FailedDevice{Name: inventory.CleanName(d.Name), Hostname: inventory.CleanName(d.Net.Hostname), Address: netaddr.Display(d.Address, d.Port, "http"), Reason: reason})
 		case model.BackupOutcomeSkipped:
 			rec.Skipped++
 		}
