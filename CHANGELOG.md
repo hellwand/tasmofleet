@@ -4,6 +4,14 @@ All notable changes. Breaking changes are marked **breaking**. tasmofleet has no
 compatibility shims (see CLAUDE.md), so read this before upgrading. Database migrations
 always upgrade automatically.
 
+## 0.34.3 "Split Rock" (2026-11-12)
+
+### Fixed
+
+- The Devices list keeps up with its live updates on larger fleets: a cell is only swapped when its content changed, and the select-all sync no longer runs for every single cell (#726)
+- The `:edge` image on ghcr no longer disappears after a re-run of the same commit: replacing the previous edge keeps every manifest that a tagged image still uses (#728)
+- CI: the weekly mutation run opens its failure issue when a shard hits the job timeout too, and it deals its files over five shards by fresh weights, so no shard runs into the limit (#729)
+
 ## 0.34.2 "Split Rock" (2026-11-12)
 
 ### Added
