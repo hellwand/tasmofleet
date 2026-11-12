@@ -1,14 +1,9 @@
 # Roadmap
 
-Rough order, no dates. Details and bug reports live in GitHub issues.
+The next releases and what they contain are the [GitHub milestones](https://github.com/hellwand/tasmofleet/milestones). This file holds only what no milestone does: the direction up to 1.0. No dates; details and bug reports live in the issues.
 
-1. **Public 0.x releases** (first ones are out): feedback from other fleets, docs with
-   screenshots, small fixes from the open bug list.
-2. **Home Assistant App (Add-on)** (stable and beta channels), using the normal `OtaUrl`
-   download with a published firmware port.
-3. **Security review** of the authentication, restore and command paths before 1.0.
-4. **Firmware development channel** (track a pre-release or custom build per device group).
-5. **Push upload for ESP8266** (`/u2`): ESP32 shipped in 0.18 (experimental); ESP8266
-   follows after a real-hardware test.
-6. **1.0**: stable configuration and routes; from then on breaking changes only in
-   major versions.
+- **Security review** of the authentication, restore and command paths, before 1.0.
+- **Firmware development channel**: track a pre-release or custom build per device group, next to the official releases.
+- **Push upload for ESP8266.** Push upload (the update is sent to the device instead of the device downloading it) works on ESP32. On ESP8266 it is still refused, and those devices download; it follows after a test on real hardware.
+- **Home Assistant app channels**: a stable and a beta channel in the app repository, so Home Assistant OS users can follow the same releases without a Docker host.
+- **1.0** means a stable configuration and stable routes. From then on, breaking changes come only in major versions.
