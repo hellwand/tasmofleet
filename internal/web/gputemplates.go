@@ -77,6 +77,7 @@ type gtDevice struct {
 	Diff       []gtDiffLine
 	WantWord   string // "reference" or "variant A"
 	Why        string
+	Ref        bool   // the group's reference: its first row, in its own colour (#547)
 	Pick       bool   // a tick box: the reference can be applied
 	UseRef     string // href of "Use as reference" ("" = none)
 	Pins       *gtPins
@@ -239,20 +240,10 @@ func (h *handler) gtBuild(ov, base templates.Overview, chosen []model.DeviceID, 
 	for _, g := range base.Groups {
 		baseNeeds[g.Key] = g.NeedsReference
 	}
-	// Groups that need a look come first: a deviating device, then a reference to choose, then the rest;
-	// the service's order (family, name) is kept inside each tier.
-	tier := func(g templates.GroupView) int {
-		switch {
-		case slices.ContainsFunc(g.Devices, func(d templates.DeviceView) bool { return d.Plan != nil && !d.Plan.Matches }):
-			return 0
-		case g.NeedsReference:
-			return 1
-		}
-		return 2
-	}
-	ordered := slices.Clone(ov.Groups)
-	sort.SliceStable(ordered, func(i, j int) bool { return tier(ordered[i]) < tier(ordered[j]) })
-	for _, g := range ordered {
+	// The groups stay in the service's order (chip family, then template name): the page refreshes by
+	// itself, so what the devices answered must never move a card (#549). Attention is in the summary
+	// line and the row chips.
+	for _, g := range ov.Groups {
 		if len(g.Devices) < 2 {
 			it := gtListItem{Title: groupTitle(g.Key), Chip: chipLabel(g.Key.Family)}
 			if len(g.Devices) == 1 {
@@ -313,7 +304,8 @@ func builtInText(module string, r policy.TemplateDevice) string {
 }
 
 // gtStacks deals the cards into the two column stacks (balanced by an estimate of their height) in
-// reading order; the folds come after the groups.
+// reading order; the folds come after the groups. The estimate counts devices only: a verdict, a diff
+// or an opened pin table changes a card's height but never the column it sits in (#549).
 func gtStacks(p gtView) [][]gtCardRef {
 	cards := make([]gtCardRef, 0, len(p.Groups)+3)
 	for i := range p.Groups {
@@ -332,24 +324,7 @@ func gtStacks(p gtView) [][]gtCardRef {
 	size := func(c gtCardRef) int {
 		switch {
 		case c.Group >= 0:
-			g := p.Groups[c.Group]
-			n := 4
-			if g.Fine != "" {
-				n += 2
-			}
-			for _, d := range g.Rows {
-				n += 2 + len(d.Diff)
-				if d.Why != "" {
-					n += 2
-				}
-				if d.Pins != nil {
-					n += 2
-					if d.Pins.Open {
-						n += len(d.Pins.Rows) + 2
-					}
-				}
-			}
-			return n
+			return 4 + 2*len(p.Groups[c.Group].Rows)
 		case c.Fold == "notjudged":
 			return 6 + 2*len(p.NotJudged)
 		case c.Fold == "builtin":
@@ -456,10 +431,8 @@ func (h *handler) gtGroupOf(g templates.GroupView, baseNeedsRef, admin bool, ran
 			row.UseRef = gtRefHref(q, g, d.ID)
 		}
 		switch {
-		case g.Reference != nil && d.ID == refID && g.Reference.How == policy.RefChosen:
-			row.Chip, row.Tone = "Reference", ui.ToneAccent
-		case g.Reference != nil && d.ID == refID:
-			row.Chip, row.Tone = "Matches", ui.ToneOK // the most common layout: the reference is one of those that match
+		case g.Reference != nil && d.ID == refID: // chosen or the most common layout: the yardstick of the group
+			row.Chip, row.Tone, row.Ref = "Reference", ui.ToneAccent, true
 		case d.Plan == nil && g.Reference != nil:
 			row.Chip, row.Tone = "Not judged", ui.ToneNeutral
 			row.Why = d.NotJudgedReason
@@ -503,6 +476,11 @@ func (h *handler) gtGroupOf(g templates.GroupView, baseNeedsRef, admin bool, ran
 			}
 		}
 		gg.Rows = append(gg.Rows, row)
+	}
+	if g.Reference != nil { // the reference first, the others stay in id order
+		if i := slices.IndexFunc(gg.Rows, func(r gtDevice) bool { return r.Ref }); i > 0 {
+			gg.Rows = slices.Concat(gg.Rows[i:i+1], gg.Rows[:i], gg.Rows[i+1:])
+		}
 	}
 	if differ == 1 { // one device differs: its pin table is open, with more it stays a line to open
 		for i := range gg.Rows {

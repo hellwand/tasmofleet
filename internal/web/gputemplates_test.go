@@ -4,6 +4,8 @@ import (
 	"context"
 	"net/url"
 	"os"
+	"regexp"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -244,6 +246,14 @@ func TestGPIOTemplatesGroupWithoutReferenceAsksForOne(t *testing.T) {
 	if strings.Contains(body, "Apply reference to") {
 		t.Error("Apply offered without a reference")
 	}
+	// No yardstick, so no row is marked as one (#547), and the rows keep their id order.
+	if strings.Contains(body, "is-ref") || strings.Contains(body, ">Reference</span>") {
+		t.Error("a group without a reference marks a reference row")
+	}
+	rows := gtRowRe.FindAllStringSubmatch(body, -1)
+	if len(rows) != 3 || rows[0][2] != "tv-plug" || rows[1][2] != "router-plug" || rows[2][2] != "balcony-plug" {
+		t.Errorf("rows %v, want id order", rows)
+	}
 }
 
 // agedFixture is gtFixture with the readings taken `age` ago, the third plug read `balconyAge` ago and
@@ -376,5 +386,148 @@ func TestGPIOTemplatesStaleRowOfAnOfflineDeviceDoesNotPromiseARead(t *testing.T)
 	_, body := gtEnv(t, f).do(t, "GET", "/policy/templates", "admin", nil)
 	if !strings.Contains(body, "The device is offline, so it is read again when it is back.") || strings.Contains(body, "It is read again when this page opens.") {
 		t.Error("an offline device's stale row promises a read on open")
+	}
+}
+
+// gtGroupFix is one group of n devices (ids first..first+n-1, named <name>-1…) that all match the
+// most common template, the first one being the reference. flip(i, true) makes device i differ.
+func gtGroupFix(name string, first model.DeviceID, n int) templates.GroupView {
+	ref := policy.GPIOTemplate{Name: name, GPIO: gpio8266(12), Base: 45}
+	g := templates.GroupView{Key: policy.GroupKey{Family: model.ChipESP8266, Name: name}}
+	for i := 0; i < n; i++ {
+		d := tdev(first+model.DeviceID(i), strings.ToLower(name)+"-"+strconv.Itoa(i+1), ref, true)
+		d.Plan = &policy.ApplyPlan{Device: d.ID, Matches: true}
+		g.Devices = append(g.Devices, d)
+	}
+	g.Reference = &policy.Reference{Device: g.Devices[0].Reading, How: policy.RefMostCommon, Count: n, Of: n}
+	return g
+}
+
+// gtSetDiffers changes the verdict of device i of g, the way a new read of that device does.
+func gtSetDiffers(g *templates.GroupView, i int, differs bool) {
+	d := &g.Devices[i]
+	if !differs {
+		d.Plan = &policy.ApplyPlan{Device: d.ID, Matches: true}
+		return
+	}
+	ref, odd := *g.Reference.Device.Template, *d.Reading.Template
+	odd.GPIO = gpio8266(11)
+	d.Reading.Template = &odd
+	diff, _ := policy.DiffTemplates(model.ChipESP8266, odd, ref)
+	d.Plan = &policy.ApplyPlan{Device: d.ID, Diff: diff, Commands: []string{"Template {}"}, Restarts: true}
+}
+
+var (
+	gtCardRe  = regexp.MustCompile(`<section class="scard (r\d+) gt-card" aria-label="([^"]+)"`)
+	gtStackRe = regexp.MustCompile(`<div class="cstack[ "]`) // not "cstacks", the wrapper
+	gtRowRe   = regexp.MustCompile(`(?s)<li class="(gt-row[^"]*)">.*?class="mono gt-name"[^>]*>([^<]+)</a>`)
+)
+
+// gtLayout reads the page back as the person sees it: the cards in reading order (the phone's order,
+// carried by the r1, r2… classes) and the column stack each one sits in.
+func gtLayout(body string) (order []string, column map[string]int) {
+	column = map[string]int{}
+	byRank := map[int]string{}
+	for col, part := range gtStackRe.Split(body, -1)[1:] {
+		for _, m := range gtCardRe.FindAllStringSubmatch(part, -1) {
+			n, _ := strconv.Atoi(m[1][1:])
+			byRank[n] = m[2]
+			column[m[2]] = col
+		}
+	}
+	for n := 1; n <= len(byRank); n++ {
+		order = append(order, byRank[n])
+	}
+	return order, column
+}
+
+// Why (#549): the page refreshes itself and the person is reading it. A device's new verdict must
+// not move any card: the order of the groups is the service's (chip family, template name), never
+// the read results, and a card stays in its column (no cards hopping between the two stacks).
+func TestGPIOTemplatesGroupsKeepPlaceWhenAVerdictChanges(t *testing.T) {
+	f := &fakeTemplates{ov: templates.Overview{ReadAt: time.Date(2026, 11, 1, 15, 58, 0, 0, time.UTC)}}
+	f.ov.Groups = []templates.GroupView{gtGroupFix("Alpha", 10, 2), gtGroupFix("Beta", 20, 2), gtGroupFix("Gamma", 30, 2), gtGroupFix("Delta", 40, 2)}
+	e := gtEnv(t, f)
+	_, body := e.do(t, "GET", "/policy/templates", "admin", nil)
+	order, column := gtLayout(body)
+	if got := strings.Join(order, ","); got != "Alpha,Beta,Gamma,Delta" {
+		t.Fatalf("reading order %s, want the service order Alpha,Beta,Gamma,Delta\n%s", got, body)
+	}
+	want := column
+
+	// Each case is one new read: a device of that group now differs (the only one, so its pin table
+	// opens and the card grows), or the group needing attention is the last one.
+	for _, c := range []struct{ group string }{{"Alpha"}, {"Beta"}, {"Delta"}} {
+		for i := range f.ov.Groups {
+			if f.ov.Groups[i].Key.Name == c.group {
+				gtSetDiffers(&f.ov.Groups[i], 1, true)
+			}
+		}
+		_, body = e.do(t, "GET", "/policy/templates", "admin", nil)
+		order2, column2 := gtLayout(body)
+		if strings.Join(order2, ",") != strings.Join(order, ",") {
+			t.Errorf("%s now differs: group order %v, was %v", c.group, order2, order)
+		}
+		for k, v := range want {
+			if column2[k] != v {
+				t.Errorf("%s now differs: card %q moved from column %d to %d", c.group, k, v, column2[k])
+			}
+		}
+		for i := range f.ov.Groups {
+			gtSetDiffers(&f.ov.Groups[i], 1, false)
+		}
+	}
+}
+
+// Why (#547): the reference is the yardstick of its group, so it is the first row, whatever the
+// device ids or the order the devices were read in, and it is marked in its own colour (chip and row
+// class), not like the devices that merely match. The others keep their id order.
+func TestGPIOTemplatesReferenceIsTheFirstRowAndMarked(t *testing.T) {
+	for _, c := range []struct {
+		name  string
+		setup func(f *fakeTemplates)
+		want  []string // row names in order
+	}{
+		{"chosen reference with a higher id", func(f *fakeTemplates) {
+			g := &f.ov.Groups[0]
+			g.Reference = &policy.Reference{Device: g.Devices[2].Reading, How: policy.RefChosen, Count: 1, Of: 3}
+		}, []string{"balcony-plug", "tv-plug", "router-plug"}},
+		{"most common reference after a deviating device with a lower id", func(f *fakeTemplates) {
+			g := &f.ov.Groups[0]
+			g.Reference = &policy.Reference{Device: g.Devices[1].Reading, How: policy.RefMostCommon, Count: 2, Of: 3}
+			gtSetDiffers(g, 0, true)
+		}, []string{"router-plug", "tv-plug", "balcony-plug"}},
+		{"most common reference that is already first", func(f *fakeTemplates) {}, []string{"tv-plug", "router-plug", "balcony-plug"}},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			f := gtFixture()
+			c.setup(f)
+			e := gtEnv(t, f)
+			_, body := e.do(t, "GET", "/policy/templates", "admin", nil)
+			rows := gtRowRe.FindAllStringSubmatch(body, -1)
+			if len(rows) != len(c.want) {
+				t.Fatalf("rows %v, want %v\n%s", rows, c.want, body)
+			}
+			for i, r := range rows {
+				if r[2] != c.want[i] {
+					t.Errorf("row %d is %q, want %q", i, r[2], c.want[i])
+				}
+				isRef := strings.Contains(r[1], "is-ref")
+				if isRef != (i == 0) {
+					t.Errorf("row %q has class %q: is-ref must mark the first row (the reference) only", r[2], r[1])
+				}
+			}
+			if strings.Count(body, ">Reference</span>") != 1 {
+				t.Errorf("the Reference chip appears %d times, want once", strings.Count(body, ">Reference</span>"))
+			}
+			start := strings.Index(body, `class="gt-row is-ref"`)
+			if start < 0 {
+				t.Fatal("no row carries the is-ref class")
+			}
+			first := body[start:]
+			if i := strings.Index(first, "</li>"); !strings.Contains(first[:i], "Reference</span>") {
+				t.Errorf("the reference row does not carry the Reference chip:\n%s", first[:i])
+			}
+		})
 	}
 }

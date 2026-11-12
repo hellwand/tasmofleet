@@ -98,7 +98,7 @@ templ gtGroupCard(p gtView, g gtGroup, rank string) {
 }
 
 templ gtRow(p gtView, g gtGroup, d gtDevice) {
-	<li class="gt-row">
+	<li class={ "gt-row", templ.KV("is-ref", d.Ref) }>
 		if d.Pick && g.Apply != nil {
 			<label class="hit gt-sel"><input type="checkbox" name="pick" value={ devStr(d.ID) } form={ g.Apply.FormID } checked aria-label={ "Apply the reference to " + d.Name }/></label>
 		} else {
