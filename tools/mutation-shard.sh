@@ -9,7 +9,10 @@
 # mutant, so the shards take about equally long: one shard per package and file would not, the
 # time per mutant differs 20-fold between packages. All packages are dealt out together (largest
 # file first to the lightest shard), so every shard job computes the same plan. A file without a
-# weights entry counts as one mutant (run tools/mutation-weights.sh to refresh the list).
+# weights entry (added since the last refresh of the list, tools/mutation-weights.sh) counts as 17
+# runnable mutants per 100 lines of code, the average of the weighted files: counting it as one mutant
+# dealt the new 85- and 115-mutant files of 2026-11 to the shard that was already the slowest, and
+# that shard ran into the job timeout (#729). A file the list gives 0 mutants stays free.
 set -eu
 weights=${MUTATION_WEIGHTS:-tools/mutation-weights.txt}
 : "${MUTATION_PKGS:?MUTATION_PKGS is not set}"
@@ -17,7 +20,7 @@ weights=${MUTATION_WEIGHTS:-tools/mutation-weights.txt}
 items=$(for p in $MUTATION_PKGS; do
 	rel=${p#./}
 	for f in $(go list -f '{{range .GoFiles}}{{.}} {{end}}' "$p"); do
-		echo "$rel $f"
+		echo "$rel $f $(grep -Evc '^[[:space:]]*(//|$)' "$p/$f" || true)"
 	done
 done | awk -v wf="$weights" '
 	BEGIN {
@@ -27,7 +30,7 @@ done | awk -v wf="$weights" '
 			if (a[1] == "cost") cost[a[2]] = a[3]; else { n[a[1] " " a[2]] = a[3]; if (a[4] != "") fc[a[1] " " a[2]] = a[4] }
 		}
 	}
-	{ c = ($1 in cost) ? cost[$1] : 100; if (($1 " " $2) in fc) c = fc[$1 " " $2]; m = (($1 " " $2) in n) ? n[$1 " " $2] : 1; print m * c, $1, $2 }' | sort -k1,1nr -k2,2 -k3,3)
+	{ c = ($1 in cost) ? cost[$1] : 100; if (($1 " " $2) in fc) c = fc[$1 " " $2]; m = (($1 " " $2) in n) ? n[$1 " " $2] : $3 * 0.17; print m * c, $1, $2 }' | sort -k1,1nr -k2,2 -k3,3)
 
 if [ "$1" = plan ]; then
 	echo "$items" | awk -v n="$2" '
