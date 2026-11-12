@@ -10,6 +10,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -351,6 +352,7 @@ func TestRunRefusesBeforeNetworkIO(t *testing.T) {
 		{operator(), "Status 0", cmdpolicy.ErrRole},
 		{operator(), "FooBar 1", cmdpolicy.ErrRole},
 		{operator(), "MqttPassword x", cmdpolicy.ErrRole},
+		{operator(), "MqttUser", cmdpolicy.ErrRole}, // P5: the bare query is admin-only although it is routed as a read (#702)
 		{admin(), "Power ON;Reset 1", cmdpolicy.ErrInvalid},
 		{operator(), "Power%3BReset", cmdpolicy.ErrInvalid},
 		{model.Principal{Subject: "x"}, "Status 2", cmdpolicy.ErrRole},
@@ -367,7 +369,7 @@ func TestRunRefusesBeforeNetworkIO(t *testing.T) {
 			t.Errorf("refusals must be audited as such: %+v", ev)
 		}
 	}
-	if len(e.rec.all()) != 9 {
+	if len(e.rec.all()) != 10 {
 		t.Errorf("every refusal is audited, got %d", len(e.rec.all()))
 	}
 }
@@ -666,6 +668,37 @@ func TestRunOverMQTTIsAuditedAndScrubbed(t *testing.T) {
 	ev := rec.all()
 	if len(ev) != 1 || !strings.Contains(ev[0].Detail, `"via":"mqtt"`) || strings.Contains(ev[0].Detail, "hunter2") {
 		t.Fatalf("audit = %+v", ev)
+	}
+}
+
+// countingHTTP answers like the device and counts what reached it.
+type countingHTTP struct {
+	tasmota.Client
+	n *atomic.Int32
+}
+
+func (h countingHTTP) Command(context.Context, tasmota.Target, string) (json.RawMessage, error) {
+	h.n.Add(1)
+	return json.RawMessage(`{"MqttUser":"bob"}`), nil
+}
+
+// Why (L2, #702): the router reads a bare MqttUser over MQTT now, and the MQTT channel masks only the replies
+// of credential commands. The login in the reply must still be masked for the console, by devicecmd.Run.
+func TestRunBareMqttUserGoesOverMQTTAndIsMasked(t *testing.T) {
+	dev := model.Device{ID: 7, Address: "192.0.2.7", Topic: "plug", MQTT: model.MQTTOurs}
+	mem := transport.NewMemory(time.Minute, time.Now)
+	var httpCalls atomic.Int32
+	r := transport.NewRouter(transport.Options{HTTP: countingHTTP{n: &httpCalls}, Devices: routerDevices{devices{7: dev}}, Facts: stubFacts{mem}, Memory: mem})
+	r.SetMQTT(stubMQTT{reply: `{"MqttUser":"bob"}`})
+	rec := &recorder{}
+	svc := New(Options{Devices: devices{7: dev}, Client: r, Audit: rec})
+	raw, err := svc.Run(t.Context(), admin(), 7, "MqttUser")
+	if err != nil || strings.Contains(string(raw), "bob") {
+		t.Fatalf("raw=%s err=%v", raw, err)
+	}
+	ev := rec.all()
+	if httpCalls.Load() != 0 || len(ev) != 1 || !strings.Contains(ev[0].Detail, `"via":"mqtt"`) {
+		t.Fatalf("http=%d audit=%+v, want the read over MQTT", httpCalls.Load(), ev)
 	}
 }
 

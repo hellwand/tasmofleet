@@ -134,6 +134,30 @@ var queryNames = map[string]bool{
 	"longitude": true, "tempoffset": true, "ledstate": true,
 }
 
+// reportsWhenBare are admin-only for the role gate (P5: a bare MqttUser names the broker login) but change
+// nothing when sent without arguments: CmndMqttUser (xdrv_02_9_mqtt.ino, Tasmota 12.5.0 and 16.0.0) stores a
+// value and sets restart_flag only when data_len > 0, and otherwise only answers the current value. So the
+// transport may route the bare form like a read (#702); who may send it stays Classify's verdict.
+var reportsWhenBare = map[string]bool{"mqttuser": true}
+
+// ReportsOnly reports whether cmd only makes the device answer and changes nothing: a read-class command,
+// or a bare name of reportsWhenBare without an index. An indexed spelling (MqttUser2) also only reports, but
+// Tasmota answers it under the plain key, which the MQTT channel would not match to the index; no caller
+// needs it, so it stays a write. It decides how a command is routed (read or write), never who may send it:
+// that is Classify and Authorize. It reads the command exactly like Classify, so callers never parse commands
+// themselves (P7).
+func ReportsOnly(cmd string) bool {
+	p, bad := parse(cmd)
+	if bad != "" {
+		return false
+	}
+	if p.args == "" && !p.has && reportsWhenBare[p.base] {
+		return true
+	}
+	v, bad := classify(p)
+	return bad == "" && v.Class == ClassRead
+}
+
 // loggedArgs are the commands whose arguments may appear in logs and history
 // besides the operator-level ones: the same settings, plus SaveData (which is
 // not a pure query: it writes flash, so it is admin even without arguments).
