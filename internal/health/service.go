@@ -46,6 +46,10 @@ const (
 	probeFreshFor = 5 * time.Minute
 	probeOKGap    = 5 * time.Minute
 	probeFailGap  = 10 * time.Minute
+
+	// pollSlack: what a background poll's contact lasts beyond the latest point its next poll is due (#669): the
+	// tick that starts that poll and the poll's own round trip.
+	pollSlack = tickEvery + pollTimeout
 )
 
 // Store is the persistence the tracker needs.
@@ -126,14 +130,19 @@ type devState struct {
 	// answered, and routing, the #598 re-read and the #580 hint rely on that.
 	lastRefused time.Time
 
-	// lastPolled is when the background poll (not a probe) last reached a device whose retained last will
-	// says Offline: an answer, or a refused HTTP API, which is an answer too (#619, #447). The will is a
+	// lastPolled is when the background poll (a snapshot read included, never a probe) last reached the device: an
+	// answer, or a refused HTTP API, which is an answer too (#619, #447). It keeps a quiet device on our broker fresh
+	// until its next poll (pollFresh, #669), and it decides a device whose retained last will says Offline. The will is a
 	// hint: a device that left our broker unclean (power cut while switching, a restored config for another
 	// broker) or has MQTT switched off keeps it, yet answers HTTP. pollGone: since then a run of OfflineAfter
 	// failed background polls ended without an answer. Only the background poll sets either, so a probe a page
 	// view asked for never moves such a device between online and offline (#456); a new will clears lastPolled.
 	lastPolled time.Time
 	pollGone   bool
+	// pollMissed: the last background poll did not reach the device (no answer, or a rejected password). It ends
+	// pollFresh's window until a background poll reaches the device again. Unlike fails, no MQTT message and no probe
+	// clears it: they are contact of their own, and they keep StaleAfter (#669).
+	pollMissed bool
 	// willReplayed: the Offline will came from the broker's replay (a retained message at start or after a
 	// reconnect), not from the device going away while we listened (#652). The first background poll that follows
 	// is the device's baseline for this run, like a first observation: it writes no history row.
@@ -514,7 +523,22 @@ func (s *Service) answersDespiteWill(ds *devState) bool {
 
 func (s *Service) fresh(ds *devState, now time.Time) bool {
 	obs := s.lastObs(ds)
-	return !obs.IsZero() && now.Sub(obs) < s.staleAfter()
+	return !obs.IsZero() && now.Sub(obs) < s.staleAfter() || s.pollFresh(ds, now)
+}
+
+// pollFresh: the background poll reached the device recently enough that its next poll is not overdue yet (#669). A
+// device on our broker whose telemetry is quiet is kept fresh by its polls alone, and they come once per POLL_INTERVAL,
+// up to 20 % late; StaleAfter follows TelePeriod, not the poll interval, so with an interval longer than that the
+// device turned Stale before every poll and Online again at it. Only the background poll counts: a probe that a page
+// view asked for decides nothing (#456), and MQTT contact keeps StaleAfter. It ends with the first background poll
+// that does not reach the device (pollMissed): from then on the device is as fresh as its other contact says, and a
+// message or a probe that follows does not bring the window back.
+func (s *Service) pollFresh(ds *devState, now time.Time) bool {
+	if ds.lastPolled.IsZero() || ds.pollMissed {
+		return false
+	}
+	late := s.pollInterval() + time.Duration(float64(s.pollInterval())*jitterFrac)
+	return now.Sub(ds.lastPolled) < max(s.staleAfter(), late)+pollSlack
 }
 
 // pollEligible: HTTP-only devices are always polled; MQTT devices only
@@ -929,7 +953,7 @@ func (s *Service) poll(ctx context.Context, id model.DeviceID, reach bool) {
 		ds.fails, ds.authFailed = 0, false
 		ds.lastHTTP = now
 		if !reach {
-			ds.lastPolled, ds.pollGone = now, false
+			ds.lastPolled, ds.pollGone, ds.pollMissed = now, false, false
 		}
 		ds.minimal = res.minimal
 		if !res.minimal {
@@ -959,19 +983,23 @@ func (s *Service) poll(ctx context.Context, id model.DeviceID, reach bool) {
 		}
 		// Contact for a device its last will reports offline too: it is online, and APIOff says that no path is left
 		// when MQTT cannot serve it either (#447, #619).
-		ds.lastPolled, ds.pollGone = now, false
+		ds.lastPolled, ds.pollGone, ds.pollMissed = now, false, false
 		// Polled again like a failing device (up to every 30 minutes), not every interval: the refusal does not
 		// change by itself, and the page's probe gives fresh information on demand.
-		// A device on our broker whose telemetry is silent (the poll was due for that) is Online only while its
-		// contact is fresh: backing off to 30 minutes would let it go Stale and back after every refusal (#652),
-		// so it is asked at the normal interval, which is quick for a refusal. A snapshot read of a device that
-		// is fresh anyway waits as long as a failing one.
+		// A device on our broker whose last will is not Offline is Online only while its contact is fresh: once its
+		// telemetry is silent its refusals are that contact, and backing off to 30 minutes would let it go Stale and
+		// back after every refusal (#652), so its next poll is due at the normal interval, which is quick for a
+		// refusal. That holds for a snapshot read too (#669): a quiet device's first read after a start is refused
+		// while its telemetry still counts, and the poll that keeps it fresh comes once the telemetry is silent. A
+		// snapshot read of a device whose telemetry goes on is not repeated before the back-off.
 		delay := max(min(s.jitter(maxBackoff), maxBackoff), s.jitter(s.pollInterval()))
-		if silent {
-			delay = s.jitter(s.pollInterval())
+		ds.nextPoll, ds.snapAfter = now.Add(delay), now.Add(delay)
+		if s.mqttMode(ds) && ds.lwt != "Offline" {
+			ds.nextPoll = now.Add(s.jitter(s.pollInterval()))
+			if silent {
+				ds.snapAfter = ds.nextPoll
+			}
 		}
-		ds.nextPoll = now.Add(delay)
-		ds.snapAfter = ds.nextPoll
 	case reach:
 		ds.probeAfter = now.Add(probeFailGap)
 		ds.forgetRefusal(err)
@@ -979,12 +1007,14 @@ func (s *Service) poll(ctx context.Context, id model.DeviceID, reach bool) {
 	case errors.Is(err, tasmota.ErrAuth):
 		ds.fails++
 		ds.authFailed = true
+		ds.pollMissed = true
 		ds.nextPoll = now.Add(s.failDelay(ds.fails))
 		ds.snapAfter = ds.nextPoll
 		detail = "http poll: credentials rejected"
 	default:
 		ds.fails++
 		ds.authFailed = false
+		ds.pollMissed = true
 		ds.forgetRefusal(err)
 		if ds.fails >= s.o.OfflineAfter {
 			// A run of background polls without an answer ends what an earlier one reached (#619). A refused

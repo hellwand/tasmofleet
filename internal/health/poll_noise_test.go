@@ -88,26 +88,73 @@ func TestFirstPollAfterReplayedWillIsABaselineNotAHistoryRow(t *testing.T) {
 	}
 }
 
-// Why (#652, moved from #645): a device on our broker with quiet telemetry and the HTTP API off is Online
-// through the refusals alone. They used to back off to 30 minutes while contact is fresh for 11, so it went
-// Stale and Online again every half hour and wrote a history row each time.
-func TestQuietDeviceWithAPIOffDoesNotFlipStaleEveryBackoff(t *testing.T) {
-	h := newHarness(t, true, Options{}, mqttDev(1, "a"))
-	h.listen()
-	h.bus.emit(mqttbus.KindLWT, "a", "LWT", "Online", false)
-	refuseAll(h)
-	h.advance(DefaultStaleAfter + time.Minute)
-	h.step() // the first poll finds the API off
-	before := len(h.st.eventTos(1))
-	for range 180 { // three hours
-		h.advance(time.Minute)
-		h.step()
-		if st := h.state(1); st != model.HealthOnline {
-			t.Fatalf("state %s at %v, want online (refusals are contact)", st, h.clk.Now())
+// quietCase is one poll interval for the quiet-device tests (#669). POLL_INTERVAL has no upper limit, and a quiet
+// device's contact comes from polls that are up to 20 % late, so the long intervals are tested at the jitter's
+// latest point (rand 0.99) as well as at its middle.
+type quietCase struct {
+	name string
+	poll time.Duration
+	rand float64
+}
+
+var quietCases = []quietCase{
+	{"5m", 5 * time.Minute, 0.5},
+	{"15m", 15 * time.Minute, 0.5},
+	{"15m late", 15 * time.Minute, 0.99},
+	{"2h", 2 * time.Hour, 0.5},
+	{"2h late", 2 * time.Hour, 0.99},
+}
+
+// statusPolls counts the Status 11 reads (polls and snapshot reads), not the restart checks.
+func statusPolls(h *harness) int {
+	n := 0
+	for _, c := range h.cl.commands() {
+		if c == "Status 11" {
+			n++
 		}
 	}
-	if got := len(h.st.eventTos(1)); got != before {
-		t.Fatalf("%d history rows in three hours of steady refusals: %v", got-before, h.st.eventTos(1))
+	return n
+}
+
+// maxPolls is the most polls one device may get in span at interval p: one per interval less the jitter's 20 %,
+// plus one for the poll at the start of the span. More would mean polling quiet devices more often than
+// POLL_INTERVAL to keep them fresh, which #669 rules out.
+func maxPolls(span, p time.Duration) int {
+	return int(span/time.Duration(float64(p)*(1-jitterFrac))) + 1
+}
+
+// Why (#652, moved from #645; #669 for the long intervals): a device on our broker with quiet telemetry and the HTTP
+// API off is Online through the refusals alone. They used to back off to 30 minutes while contact is fresh for 11, so
+// it went Stale and Online again every half hour and wrote a history row each time. At a POLL_INTERVAL longer than
+// StaleAfter the refusals come once per interval, so the contact they give must last until the next one: at 15
+// minutes the device wrote 192 rows a day, at 2 hours it was Stale most of the day.
+func TestQuietDeviceWithAPIOffDoesNotFlipStaleEveryBackoff(t *testing.T) {
+	for _, tc := range quietCases {
+		t.Run(tc.name, func(t *testing.T) {
+			h := newHarness(t, true, Options{PollInterval: tc.poll}, mqttDev(1, "a"))
+			h.svc.d.Rand = func() float64 { return tc.rand }
+			h.listen()
+			h.bus.emit(mqttbus.KindLWT, "a", "LWT", "Online", false)
+			refuseAll(h)
+			h.advance(DefaultStaleAfter + time.Minute)
+			h.step() // the first poll finds the API off
+			h.cl.reset()
+			before := len(h.st.eventTos(1))
+			const span = 24 * time.Hour
+			for range int(span / time.Minute) {
+				h.advance(time.Minute)
+				h.step()
+				if st := h.state(1); st != model.HealthOnline {
+					t.Fatalf("state %s at %v, want online (refusals are contact)", st, h.clk.Now())
+				}
+			}
+			if got := len(h.st.eventTos(1)); got != before {
+				t.Fatalf("%d history rows in a day of steady refusals: %v", got-before, h.st.eventTos(1))
+			}
+			if n := statusPolls(h); n > maxPolls(span, tc.poll) {
+				t.Fatalf("%d polls in a day at a %v interval, want at most %d", n, tc.poll, maxPolls(span, tc.poll))
+			}
+		})
 	}
 }
 
@@ -130,32 +177,128 @@ func TestBackoffNeverUndercutsALongPollInterval(t *testing.T) {
 	}
 }
 
-// Why (#652): a quiet device on our broker whose HTTP API answers is polled like a device without MQTT: once per
-// interval. Its answer must schedule the next poll; with "due now" it would be asked on every 5 s tick, because
-// an HTTP answer no longer stops the polls of a device whose telemetry is quiet. It stays Online throughout
-// instead of going Stale and back at every poll (main did that every 11 minutes).
+// Why (#652; #669 for the long intervals): a quiet device on our broker whose HTTP API answers is polled like a
+// device without MQTT: once per interval. Its answer must schedule the next poll; with "due now" it would be asked on
+// every tick, because an HTTP answer no longer stops the polls of a device whose telemetry is quiet. It stays Online
+// throughout instead of going Stale and back at every poll (main did that every 11 minutes before #652, and at every
+// POLL_INTERVAL longer than StaleAfter before #669).
 func TestQuietDeviceThatAnswersIsPolledOncePerIntervalAndStaysOnline(t *testing.T) {
-	h := newHarness(t, true, Options{}, mqttDev(1, "a"))
-	h.listen()
-	h.bus.emit(mqttbus.KindLWT, "a", "LWT", "Online", false)
-	h.bus.emit(mqttbus.KindState, "a", "STATE", `{"UptimeSec":5}`, false) // no snapshot read either
-	h.advance(DefaultStaleAfter + time.Minute)
-	h.step() // the first poll: the telemetry is quiet
-	h.cl.reset()
-	before := len(h.st.eventTos(1))
-	for range int(time.Hour / tickEvery) { // one hour, tick by tick
-		h.advance(tickEvery)
-		h.step()
-		if st := h.state(1); st != model.HealthOnline {
-			t.Fatalf("state %s at %v, want online (each answer is contact)", st, h.clk.Now())
+	for _, tc := range quietCases {
+		t.Run(tc.name, func(t *testing.T) {
+			h := newHarness(t, true, Options{PollInterval: tc.poll}, mqttDev(1, "a"))
+			h.svc.d.Rand = func() float64 { return tc.rand }
+			h.listen()
+			h.bus.emit(mqttbus.KindLWT, "a", "LWT", "Online", false)
+			h.bus.emit(mqttbus.KindState, "a", "STATE", `{"UptimeSec":5}`, false) // no snapshot read either
+			h.advance(DefaultStaleAfter + time.Minute)
+			h.step() // the first poll: the telemetry is quiet
+			h.cl.reset()
+			before := len(h.st.eventTos(1))
+			const span = 24 * time.Hour
+			for range int(span / time.Minute) {
+				h.advance(time.Minute)
+				h.step()
+				if st := h.state(1); st != model.HealthOnline {
+					t.Fatalf("state %s at %v, want online (each answer is contact)", st, h.clk.Now())
+				}
+			}
+			late := tc.poll + time.Duration(float64(tc.poll)*jitterFrac)
+			if n, least := statusPolls(h), int(span/late)-1; n < least || n > maxPolls(span, tc.poll) {
+				t.Fatalf("%d polls in a day, want one per %v interval (%d to %d)", n, tc.poll, least, maxPolls(span, tc.poll))
+			}
+			if got := len(h.st.eventTos(1)); got != before {
+				t.Fatalf("%d history rows in a day of answers: %v", got-before, h.st.eventTos(1))
+			}
+		})
+	}
+}
+
+// Why (#669): after a start the broker replays the retained "Online" will of every device, and a quiet device sends
+// nothing else. Its first tick reads a snapshot over HTTP (an answer or a refusal); the polls that keep it fresh may
+// only begin once its MQTT contact is StaleAfter old. That moment used to turn it Stale and the poll a moment later
+// Online again (with the API off the poll came only after the 30 minute back-off), so every start wrote two history
+// rows per quiet device. The snapshot read is contact like any poll and must carry the device to its first poll,
+// without polling it more often than POLL_INTERVAL.
+func TestStartWritesNoHistoryRowsForAQuietDevice(t *testing.T) {
+	for _, api := range []string{"on", "off"} {
+		for _, tc := range quietCases {
+			t.Run("api "+api+"/"+tc.name, func(t *testing.T) {
+				h := newHarness(t, true, Options{PollInterval: tc.poll}, mqttDev(1, "a"))
+				h.svc.d.Rand = func() float64 { return tc.rand }
+				if api == "off" {
+					refuseAll(h)
+				}
+				h.listen()
+				h.bus.emit(mqttbus.KindLWT, "a", "LWT", "Online", true) // the broker's replay at our start
+				const span = 3 * time.Hour                              // the first polls at every interval, 2 h late included
+				for range int(span / tickEvery) {
+					h.step()
+					if st := h.state(1); st != model.HealthOnline {
+						t.Fatalf("state %s at %v after the start, want online", st, h.clk.Now().Sub(h.svc.started))
+					}
+					h.advance(tickEvery)
+				}
+				if got := h.st.eventTos(1); len(got) != 0 {
+					t.Fatalf("history rows after a start: %v", got)
+				}
+				if n := statusPolls(h); n > maxPolls(span, tc.poll)+1 { // +1: the snapshot read at the start
+					t.Fatalf("%d polls in %v after a start at a %v interval, want at most %d", n, span, tc.poll, maxPolls(span, tc.poll)+1)
+				}
+			})
 		}
 	}
-	if n := len(h.cl.commands()); n < 10 || n > 13 {
-		t.Fatalf("%d polls in one hour, want one per 5 minute interval", n)
+}
+
+// Why (#669): the contact a poll gives lasts until the next poll is due, but only while the polls reach the device.
+// A quiet device that dies must not stay Online for most of an interval after the poll that found it gone: it is
+// Stale from that poll on, as it would be if its contact had only lasted StaleAfter, and Offline after OfflineAfter
+// failed polls as before.
+func TestQuietDeviceIsStaleFromThePollThatNoLongerReachesIt(t *testing.T) {
+	h := newHarness(t, true, Options{PollInterval: 2 * time.Hour}, mqttDev(1, "a"))
+	h.listen()
+	h.bus.emit(mqttbus.KindLWT, "a", "LWT", "Online", true)
+	for range int(5 * time.Hour / time.Minute) { // polled at its interval, Online throughout
+		h.step()
+		if st := h.state(1); st != model.HealthOnline {
+			t.Fatalf("state %s at %v, want online while the polls answer", st, h.clk.Now().Sub(h.svc.started))
+		}
+		h.advance(time.Minute)
 	}
-	if got := len(h.st.eventTos(1)); got != before {
-		t.Fatalf("%d history rows in an hour of answers: %v", got-before, h.st.eventTos(1))
+	failAll(h, errDown)
+	h.cl.reset()
+	for statusPolls(h) == 0 {
+		if h.clk.Now().Sub(h.svc.started) > 8*time.Hour {
+			t.Fatal("no poll within three hours at a 2 h interval")
+		}
+		h.want(1, model.HealthOnline) // nothing new is known before the next poll
+		h.advance(time.Minute)
+		h.step()
 	}
+	h.want(1, model.HealthStale)
+	if got := h.st.eventTos(1); len(got) != 1 || got[0] != model.HealthStale {
+		t.Fatalf("history %v, want the one drop to Stale at the failed poll", got)
+	}
+	// Other contact resets the failure count, yet the poll still did not reach the device: a message it sends (a
+	// button press) and a probe that a page view asks for (#456) each count for StaleAfter, as without the window.
+	staleAfterIt := func(what string) {
+		t.Helper()
+		from := h.clk.Now()
+		for h.clk.Now().Sub(from) <= h.svc.staleAfter() {
+			h.advance(tickEvery)
+			h.step()
+		}
+		if st := h.state(1); st != model.HealthStale {
+			t.Fatalf("state %s %v after %s, want stale once StaleAfter (%v) has passed", st, h.clk.Now().Sub(from), what, h.svc.staleAfter())
+		}
+	}
+	h.cl.set(func(string, string) (json.RawMessage, error) { return json.RawMessage(sts11), nil })
+	h.bus.emit(mqttbus.KindPower, "a", "POWER", "ON", false)
+	h.want(1, model.HealthOnline)
+	staleAfterIt("a POWER message")
+	h.svc.ProbeHTTP(1)
+	h.step()
+	h.want(1, model.HealthOnline)
+	staleAfterIt("a probe")
 }
 
 // Why (#652): only the first poll after a *replayed* will is a baseline. After a live will (a reboot, a move to

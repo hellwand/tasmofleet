@@ -232,14 +232,19 @@ func TestRefusedPollsBackOffLikeFailingOnes(t *testing.T) {
 	if n := len(h.cl.commands()); n != 2 {
 		t.Fatalf("no poll 31 minutes after a refusal: %v", h.cl.commands())
 	}
-	// The snapshot read of a device on MQTT that never sent its STATE is such a poll too: refused, it waits as long.
+	// The snapshot read of a device on MQTT that never sent its STATE is such a poll too: refused, it waits as long
+	// while the device's other messages keep it fresh. (A device that falls silent instead is polled at the normal
+	// interval, because its refusals are then what keeps it online: #652, #669.)
 	m := newHarness(t, true, Options{}, mqttDev(1, "a"))
 	m.listen()
 	m.bus.emit(mqttbus.KindLWT, "a", "LWT", "Online", false)
 	refuseAll(m)
 	m.step()
-	for range 23 {
+	for i := range 23 {
 		m.advance(time.Minute)
+		if i%5 == 0 {
+			m.bus.emit(mqttbus.KindPower, "a", "POWER", "ON", false)
+		}
 		m.step()
 	}
 	if n := len(m.cl.commands()); n != 1 {
