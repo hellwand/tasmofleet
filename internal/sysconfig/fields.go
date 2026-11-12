@@ -141,7 +141,7 @@ var fields = []Field{
 
 	{Key: "AUTH_MODE", Group: GroupSignIn, Label: "Sign-in mode", Apply: Restart, StepUp: StepUpAlways, Enum: []string{"local", "oidc"},
 		Help: "local: accounts of this server. oidc: single sign-on through your identity provider; local accounts always remain as break-glass access. Needs PUBLIC_URL in the container configuration."},
-	{Key: "OIDC_ISSUER", Group: GroupSignIn, Label: "Issuer URL", Apply: Restart, StepUp: StepUpAlways, Help: "e.g. https://auth.example/application/o/tasmofleet/ (with the trailing slash)."},
+	{Key: "OIDC_ISSUER", Group: GroupSignIn, Label: "Issuer URL", Apply: Restart, StepUp: StepUpAlways, Help: "Exactly the issuer your identity provider publishes in its discovery document. Authentik's ends with a slash, e.g. https://auth.example/application/o/tasmofleet/."},
 	{Key: "OIDC_CLIENT_ID", Group: GroupSignIn, Label: "Client ID", Apply: Restart, StepUp: StepUpAlways, Help: "The client ID registered for tasmofleet at your identity provider."},
 	{Key: "OIDC_CLIENT_SECRET", Group: GroupSignIn, Label: "Client secret", Apply: Restart, StepUp: StepUpAlways, Secret: true, Help: "Write-only. Sent only to the issuer it was entered for; change the issuer and it must be entered again."},
 	{Key: "OIDC_SCOPES", Group: GroupSignIn, Label: "Scopes", Apply: Restart, Help: "Comma separated, default openid,profile,email."},

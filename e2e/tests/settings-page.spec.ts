@@ -284,6 +284,67 @@ test.describe("with local accounts", () => {
     await expect(page.locator("[data-sys-bar] .sbar-chip")).toHaveText(["Sign-in"]);
   });
 
+  // Why (#705): "Test discovery" posts with htmx and swaps its own row, but the server answered with
+  // the complete settings page, so a second copy of the page was drawn inside the Identity
+  // provider card on every click. Only the result line may change: one page, one form, the typed
+  // issuer still in its field, and the button must work again (a second click is answered too).
+  // The check refuses loopback addresses, so a loopback issuer is a real failure without a network.
+  async function chooseSingleSignOn(page: import("@playwright/test").Page) {
+    await login(page);
+    await page.goto(local.url + "/settings/system?tab=signin");
+    await page.locator("[data-key='AUTH_MODE'] label.rcard", { hasText: "Single sign-on" }).click();
+  }
+  async function expectOnlyTheRowChanged(page: import("@playwright/test").Page) {
+    await expect(page.locator("h1")).toHaveCount(1);
+    await expect(page.locator("#sysform")).toHaveCount(1);
+    await expect(page.locator("#card-idp .sys-test")).toHaveCount(1);
+    await expect(page.locator("#card-idp form, #card-idp header, #card-idp [data-sys-bar]")).toHaveCount(0);
+  }
+
+  test("Test discovery answers in its own row: no issuer, a refused issuer, and a second click", async ({ page }) => {
+    await chooseSingleSignOn(page);
+    const issuer = page.locator("input[name='v.OIDC_ISSUER']");
+    const button = page.locator("#card-idp").getByRole("button", { name: "Test discovery" });
+    const result = page.locator("#card-idp .sys-test-res");
+
+    await issuer.fill("");
+    await button.click();
+    await expect(result).toHaveText("SSO check: failed: enter an issuer URL to test");
+    await expect(result).toHaveClass(/t-danger/);
+    await expectOnlyTheRowChanged(page);
+
+    await issuer.fill("http://127.0.0.1:9/");
+    await button.click();
+    await expect(result).toHaveText(/^SSO check: failed: no usable OIDC provider at 127\.0\.0\.1:9/);
+    await expect(result).toHaveClass(/t-danger/);
+    await expect(result).toHaveAttribute("role", "alert");
+    await expectOnlyTheRowChanged(page);
+    await expect(issuer).toHaveValue("http://127.0.0.1:9/"); // the form was not redrawn
+
+    await button.click(); // the swapped button still works; the service allows one test per few seconds
+    await expect(result).toHaveText("SSO check: failed: wait a few seconds between connection tests");
+    await expectOnlyTheRowChanged(page);
+    await expect(issuer).toHaveValue("http://127.0.0.1:9/");
+  });
+
+  // The answer is stubbed here: the check cannot reach a provider on loopback, so a working
+  // discovery is covered by the Go test. This only shows that a success row swaps in the same way.
+  test("Test discovery: a success row swaps in as a status", async ({ page }) => {
+    await chooseSingleSignOn(page);
+    await page.route("**/settings/system/sso-test*", (route) =>
+      route.fulfill({
+        status: 200,
+        contentType: "text/html; charset=utf-8",
+        body: '<div class="sys-test"><button type="submit" class="btn" formaction="/settings/system/sso-test?tab=signin" formnovalidate hx-post="/settings/system/sso-test?tab=signin" hx-include="#sysform" hx-target="closest .sys-test" hx-swap="outerHTML">Test discovery</button><span class="sys-test-res t-ok" role="status">SSO check: discovery OK: authorization at idp.example, token endpoint at idp.example</span></div>',
+      }),
+    );
+    await page.locator("input[name='v.OIDC_ISSUER']").fill("https://idp.example/");
+    await page.locator("#card-idp").getByRole("button", { name: "Test discovery" }).click();
+    await expect(page.locator("#card-idp .sys-test-res")).toHaveText(/^SSO check: discovery OK/);
+    await expect(page.locator("#card-idp .sys-test-res")).toHaveAttribute("role", "status");
+    await expectOnlyTheRowChanged(page);
+  });
+
   // Screenshots of every tab for review: SETTINGS_SHOTS=<dir>.
   test("screenshots of every tab", async ({ page }) => {
     test.skip(!process.env.SETTINGS_SHOTS, "set SETTINGS_SHOTS=<dir> to write screenshots");
