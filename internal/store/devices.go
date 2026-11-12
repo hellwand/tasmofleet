@@ -234,17 +234,16 @@ func (s *SQLite) CreateDevice(ctx context.Context, d model.Device) (model.Device
 		return 0, err
 	}
 	defer tx.Rollback() //nolint:errcheck // no-op after commit; on failure the original error is returned
-	res, err := tx.ExecContext(ctx, `INSERT INTO devices (name, address, port, mac, topic, full_topic, tags, notes,
+	id, err := nextID(ctx, tx, nextDeviceIDQuery)
+	if err != nil {
+		return 0, err
+	}
+	if _, err := tx.ExecContext(ctx, `INSERT INTO devices (id, name, address, port, mac, topic, full_topic, tags, notes,
 		http_user, http_password, ota_excluded, mqtt_capability, chip_family, hardware, single_core, fw_version, fw_image,
 		fw_variant, fw_language, flash_size_kb, program_flash_kb, free_kb, identity_at, created_at, updated_at, mqtt_host, mqtt_port,
 		net_hostname, net_ip, net_gateway, net_ssid, net_bssid, net_channel, net_wired, net_at, net_subnet, net_dns, ota_url, relay_names, group_topic, ota_url_read_at, group_topic_read_at, identity_lang_known, fwr_facts)
-		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, args...)
-	if err != nil {
+		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, append([]any{id}, args...)...); err != nil {
 		return 0, mapErr(err)
-	}
-	id, err := res.LastInsertId()
-	if err != nil {
-		return 0, err
 	}
 	for _, m := range macSet(d.MAC, d.MACs) {
 		if _, err := tx.ExecContext(ctx, "INSERT INTO device_macs (mac, device_id) VALUES (?,?)", m, id); err != nil {
