@@ -785,6 +785,9 @@ func (e *Engine) signal() {
 func (e *Engine) Run(ctx context.Context) error {
 	active, err := e.jobs.ActiveJobs(ctx)
 	if err != nil {
+		if ctx.Err() != nil {
+			return nil // cancelled before the resume read finished: a stop like below, not a failure (#695)
+		}
 		return fmt.Errorf("ota: resume: %w", err)
 	}
 	var wg sync.WaitGroup
