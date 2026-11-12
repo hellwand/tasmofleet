@@ -9544,6 +9544,25 @@ nav.crumbs a {
     margin-top: var(--sp-16);
   }
 }
+/* The GPIO templates page refreshes itself and a read changes how tall a card is (pin table, Why lines,
+   diffs). Between phone and desktop width the other pages let the browser flow the stacks into two
+   columns by real height; here the two stacks stay two real columns, so no card changes sides when a
+   verdict does (#549). Stacks per column, no row gaps. */
+@media (min-width: 45rem) and (max-width: 74.99rem) {
+  #gt-page .cstacks-2 {
+    display: grid;
+    columns: auto;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  #gt-page .cstack {
+    display: flex;
+    flex-direction: column;
+    gap: var(--sp-16);
+  }
+  #gt-page .cstack > * {
+    margin: 0;
+  }
+}
 @media (max-width: 44.99rem) {
   .cstacks,
   .cstacks-1 {
@@ -15551,6 +15570,20 @@ details.devcard > summary {
 .gt-row:first-child {
   border-top: 0;
   padding-top: 0;
+}
+/* the group's reference (#547): always the first row, tinted so it reads as the yardstick of the
+   others; the tint reaches a little past the text, the row after it needs no rule above it */
+.gt-row.is-ref {
+  margin-inline: calc(-1 * var(--sp-8));
+  padding-inline: var(--sp-8);
+  border-radius: var(--r-banner);
+  background: var(--color-accent-bg);
+}
+.gt-row.is-ref:first-child {
+  padding-top: var(--sp-8);
+}
+.gt-row.is-ref + .gt-row {
+  border-top: 0;
 }
 .gt-sel {
   display: flex;

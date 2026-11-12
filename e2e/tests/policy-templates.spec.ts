@@ -163,3 +163,60 @@ test("templates routes: no CSRF token is refused, a GET does nothing", async ({ 
     expect([404, 405], "GET " + p).toContain(get.status());
   }
 });
+
+// What the person sees of the layout: the cards in reading order (the r1, r2 ... classes), the column
+// stack each one sits in, the side of the page it is drawn on (what the person sees: at tablet width
+// the browser may flow the stacks into columns by real height), and the device rows of each card in order.
+async function layout(page: import("@playwright/test").Page) {
+  return page.evaluate(() => {
+    const cards = [...document.querySelectorAll<HTMLElement>(".cstack .gt-card")].map((c) => ({
+      label: c.getAttribute("aria-label") ?? "",
+      rank: Number([...c.classList].find((k) => /^r\d+$/.test(k))?.slice(1)),
+      column: [...document.querySelectorAll(".cstack")].indexOf(c.closest(".cstack")!),
+      side: c.getBoundingClientRect().left + c.getBoundingClientRect().width / 2 < window.innerWidth / 2 ? "left" : "right",
+      rows: [...c.querySelectorAll(".gt-row .gt-name")].map((n) => n.textContent ?? ""),
+    }));
+    return cards.sort((a, b) => a.rank - b.rank).map((c) => `${c.rank} ${c.label} column ${c.column} ${c.side}: ${c.rows.join(", ")}`);
+  });
+}
+
+// This test comes last: it runs a transaction of its own, and the tests above count on the transaction numbers.
+// Why (#549, #547): the page refreshes itself while the person reads it, so a device's new verdict
+// must not move any card. Here the Dimmer Board group goes from "one board differs" to "all match": the
+// groups keep their order and their columns, and every group keeps its rows in the same order (the
+// reference first, the others by id): only the chips change. The reference is the first row of its
+// group, in its own colour. Checked at desktop width and at tablet width (800 px), where the cards must
+// stay on the same side of the page too, although their height changes when a verdict does.
+test("templates tab: a verdict that changes between two reads moves no group and no row", async ({ page }) => {
+  test.setTimeout(180_000);
+  await page.setExtraHTTPHeaders(admin);
+  await readAll(page);
+  const before = await layout(page);
+  expect(before.length).toBeGreaterThanOrEqual(3);
+  await page.setViewportSize({ width: 800, height: 1000 });
+  const beforeTablet = await layout(page);
+  expect(beforeTablet.some((l) => l.includes(" left:")) && beforeTablet.some((l) => l.includes(" right:")), "two columns at 800 px").toBe(true);
+  await page.setViewportSize({ width: 1280, height: 720 });
+  const card = () => page.locator(".gt-card", { hasText: "tpl-esp32-3" });
+  const row = () => card().locator(".gt-row", { hasText: "tpl-esp32-3" });
+  await expect(row().getByText("Differs")).toBeVisible();
+  // the reference of a group is its first row, in its own colour, and the only one (a tie has none)
+  for (const g of await page.locator(".gt-card").all()) {
+    if ((await g.locator(".gt-row").count()) === 0 || (await g.locator(".gt-choose").count()) > 0) continue;
+    await expect(g.locator(".gt-row.is-ref")).toHaveCount(1);
+    await expect(g.locator(".gt-row").first()).toHaveClass(/is-ref/);
+  }
+
+  await card().getByRole("button", { name: /^Apply reference to \d/ }).click();
+  await page.getByLabel(/I checked the changes/).check();
+  await page.getByRole("button", { name: /^Back up, apply and restart 1 device/ }).click();
+  await expect(page).toHaveURL(/\/transactions\/\d+/);
+  await expect(page.locator("#txn-state")).toHaveText("Completed", { timeout: 90_000 });
+
+  await page.goto(app.url + "/policy/templates");
+  await expect(page.locator("p.agebar[aria-busy=true]")).toHaveCount(0, { timeout: 60_000 }); // the page's own read is done and swapped in
+  await expect(row().getByText("Matches")).toBeVisible();
+  expect(await layout(page)).toEqual(before);
+  await page.setViewportSize({ width: 800, height: 1000 });
+  expect(await layout(page)).toEqual(beforeTablet);
+});
