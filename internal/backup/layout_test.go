@@ -1,15 +1,18 @@
 package backup
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"log/slog"
 	"os"
 	"path"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
@@ -605,6 +608,83 @@ func TestSyncDir(t *testing.T) {
 	}
 	if err := syncDir(filepath.Join(t.TempDir(), "missing")); err == nil {
 		t.Error("missing dir must fail")
+	}
+}
+
+// Why (#548): file systems without directory fsync (vboxsf, some 9p and SMB
+// mounts) answer EINVAL, ENOTSUP or ENOSYS. The migration must treat that like
+// the backups themselves do (writeAtomic): nothing to wait for, so the row is
+// updated in the same run, and the limitation is logged once per directory.
+// Both directory syncs go through the injectable flushDir; if they bypassed it
+// this rule could not apply and a mount like that would leave every row to the
+// next start's crash repair.
+func TestMigrateLayoutWithoutDirectorySyncUpdatesTheRowInTheSameRun(t *testing.T) {
+	for name, errno := range map[string]syscall.Errno{"EINVAL": syscall.EINVAL, "ENOTSUP": syscall.ENOTSUP, "ENOSYS": syscall.ENOSYS} {
+		t.Run(name, func(t *testing.T) {
+			e, _ := fleetEnv(t, host(7, "Kitchen", "kitchen-spot"))
+			var logs bytes.Buffer
+			e.m.o.Log = slog.New(slog.NewTextHandler(&logs, nil))
+			var synced []string
+			e.m.flushDir = func(dir string) error {
+				synced = append(synced, filepath.Base(dir))
+				return &os.PathError{Op: "sync", Path: dir, Err: errno}
+			}
+			rows := legacy(t, e,
+				legacyFile{dev: 7, stamp: "20261018T120000Z", kind: model.BackupConfigDump, content: "dump-a"},
+				legacyFile{dev: 7, stamp: "20261018T120000Z", kind: model.BackupSnapshot, content: "snap-a"},
+			)
+			res, err := e.m.MigrateLayout(t.Context())
+			if err != nil {
+				t.Fatal(err)
+			}
+			if res.Moved != 2 || res.Left != 0 {
+				t.Fatalf("result %+v, want both files moved in this run", res)
+			}
+			for _, r := range rows {
+				if got, _ := e.st.GetBackup(t.Context(), r.ID); got.Path == r.Path {
+					t.Errorf("row %d still points to %s: the update waited for the next start", r.ID, got.Path)
+				}
+				if data, _, err := e.m.Open(t.Context(), r.ID); err != nil || sha(string(data)) != r.SHA256 {
+					t.Errorf("backup %d unreadable after migration: %v", r.ID, err)
+				}
+			}
+			if want := "kitchen-spot 7 kitchen-spot 7"; strings.Join(synced, " ") != want {
+				t.Errorf("flushDir saw %v, want the target and the source directory of each file", synced)
+			}
+			if n := strings.Count(logs.String(), "directory sync not supported"); n != 2 {
+				t.Errorf("limitation logged %d times, want once per directory (target and source):\n%s", n, logs.String())
+			}
+		})
+	}
+}
+
+// Why (#548): only "there is no directory fsync" is let through. A real I/O
+// error means the rename may not survive a power loss, so the row keeps the
+// old path (left in place, logged) and the next start finds the file by its
+// checksum, as for a crash after the rename.
+func TestMigrateLayoutDirectorySyncFailureLeavesTheEntry(t *testing.T) {
+	e, _ := fleetEnv(t, host(7, "Kitchen", "kitchen-spot"))
+	e.m.flushDir = func(dir string) error { return &os.PathError{Op: "sync", Path: dir, Err: syscall.EIO} }
+	rows := legacy(t, e, legacyFile{dev: 7, stamp: "20261018T120000Z", kind: model.BackupConfigDump, content: "dump-a"})
+
+	res, err := e.m.MigrateLayout(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Left != 1 || res.Moved != 0 {
+		t.Fatalf("result %+v, want the entry left in place", res)
+	}
+	if got, _ := e.st.GetBackup(t.Context(), rows[0].ID); got.Path != rows[0].Path {
+		t.Errorf("row changed to %s although the rename was not made durable", got.Path)
+	}
+
+	e.m.flushDir = syncDir // the disk is healthy again at the next start
+	res, err = e.m.MigrateLayout(t.Context())
+	if err != nil || res.Repaired != 1 || res.Left != 0 {
+		t.Fatalf("next start: %+v, %v; want the moved file found and its row repaired", res, err)
+	}
+	if data, _, err := e.m.Open(t.Context(), rows[0].ID); err != nil || string(data) != "dump-a" {
+		t.Errorf("not readable after repair: %v", err)
 	}
 }
 
