@@ -317,6 +317,14 @@ func TestCommandActionIsWhatTheRouterDoes(t *testing.T) {
 		{"Status 2", ActCommands},
 		{"TelePeriod", ActCommands},
 		{"NoSuchCommand 1", ActWrites}, // not classified: counts as a write
+		// #702: a bare MqttUser only reports (admin-only in the console, but that is who may send it, not
+		// what it does); with a value it changes the login and restarts the device.
+		{"MqttUser", ActCommands},
+		{"mqttuser", ActCommands},
+		{"MqttUser2", ActWrites}, // only the exact bare name: an indexed reply would not be matched over MQTT
+		{"MqttUser bob", ActWrites},
+		{"Backlog MqttUser", ActWrites},
+		{"MqttPassword", ActWrites}, // not on the list: a bare MqttPassword stays a write
 	} {
 		if got := CommandAction(c.cmd); got != c.want {
 			t.Errorf("CommandAction(%q) = %s, want %s", c.cmd, got, c.want)

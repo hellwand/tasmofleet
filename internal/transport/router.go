@@ -267,14 +267,16 @@ type cmdClass struct {
 
 func classifyCommand(cmnd string) cmdClass {
 	v, err := cmdpolicy.Classify(cmnd)
-	c := cmdClass{write: err != nil || v.Class != cmdpolicy.ClassRead, redact: v.Redact || err != nil}
+	// Routing takes "changes the device" from ReportsOnly, not from the role class: a bare MqttUser is admin-only
+	// but only reports, and sent as a write it went over HTTP first and failed the Settings read (#702).
+	c := cmdClass{write: err != nil || !cmdpolicy.ReportsOnly(cmnd), redact: v.Redact || err != nil}
 	c.job = startsJob(cmnd)
 	return c
 }
 
 // CommandAction is the action a free-form command needs, by the router's own classification (classifyCommand,
-// which Command uses): ActJob for a command that starts a job, ActWrites for anything that is not a read (a
-// command the policy does not classify counts as a write), else ActCommands. The console and bulk gates use
+// which Command uses): ActJob for a command that starts a job, ActWrites for anything that changes the device
+// (not cmdpolicy.ReportsOnly; a command the policy does not classify counts as a write), else ActCommands. The console and bulk gates use
 // it, so they refuse what the router would not send over MQTT.
 func CommandAction(cmnd string) Action {
 	switch cls := classifyCommand(cmnd); {

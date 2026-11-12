@@ -261,6 +261,52 @@ func TestAuthorize(t *testing.T) {
 	}
 }
 
+// Why (P5, #702): a bare MqttUser names the login of the device's broker account, so only an admin may ask for
+// it in the console, and its argument never reaches a log. The transport routes the bare form like a read
+// (ReportsOnly); that must never make it an operator command. Adding "mqttuser" to queryNames would.
+func TestBareMqttUserStaysAdminOnly(t *testing.T) {
+	for _, cmd := range []string{"MqttUser", "mqttuser", "MqttUser1"} {
+		if v, err := Classify(cmd); err != nil || v.Class != ClassAdmin {
+			t.Errorf("Classify(%q) = %v, %v; want admin", cmd, v.Class, err)
+		}
+		if _, err := Authorize(cmd, model.RoleOperator); !errors.Is(err, ErrRole) {
+			t.Errorf("Authorize(%q, operator) = %v, want ErrRole", cmd, err)
+		}
+		if _, err := Authorize(cmd, model.RoleAdmin); err != nil {
+			t.Errorf("Authorize(%q, admin) = %v, want nil", cmd, err)
+		}
+	}
+	if got := Redacted("MqttUser bob"); got != "MqttUser ***" {
+		t.Errorf("Redacted(MqttUser bob) = %q, want the login hidden", got)
+	}
+}
+
+// Why (#702): the transport routes what ReportsOnly accepts like a read (MQTT first, HTTP may be asked a second
+// time after an unanswered MQTT read). That is only safe for a line that changes nothing on the device.
+func TestReportsOnly(t *testing.T) {
+	for cmd, want := range map[string]bool{
+		"Status 2":           true,  // a read-class command
+		"TelePeriod":         true,  // a bare query
+		"MqttUser":           true,  // admin-only, but bare it only answers
+		"  mqttuser ":        true,  // read like Classify reads it
+		"MqttUser2":          false, // answered under the plain key, which the MQTT channel would not match
+		"MqttUser bob":       false, // stores a new login and restarts the device
+		"Backlog MqttUser":   false, // a Backlog is never a read
+		"MqttPassword":       false, // not on the list
+		"TelePeriod 60":      false, // a query name with a value writes
+		"Power1 ON":          false, // operator class acts
+		"SaveData":           false, // bare, but writes flash
+		"MqttUser;Reset 1":   false, // malformed
+		"MqttUser\u200b":     false, // malformed
+		"":                   false,
+		"Status 2;Restart 1": false,
+	} {
+		if got := ReportsOnly(cmd); got != want {
+			t.Errorf("ReportsOnly(%q) = %v, want %v", cmd, got, want)
+		}
+	}
+}
+
 func TestClassMinRole(t *testing.T) {
 	for c, want := range map[Class]model.Role{ClassRead: model.RoleOperator, ClassOperator: model.RoleOperator, ClassAdmin: model.RoleAdmin} {
 		if got, ok := c.MinRole(); !ok || got != want {

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"slices"
 	"sync"
 	"testing"
 	"time"
@@ -180,5 +181,24 @@ func TestUnansweredMQTTReadIsAskedOnceOverHTTPAndTheDeviceIsMarked(t *testing.T)
 	}
 	if p := transport.Choose(f); p.Commands != transport.HTTP {
 		t.Fatalf("reads = %s (%s), want HTTP while the mark is fresh", p.Commands, p.Reason(transport.ActCommands))
+	}
+}
+
+// Why (#702): the Settings tab reads one bare command per field and discards the whole read on the first
+// error. A single field the router sends over HTTP first makes the tab fail on a device that is live on our
+// broker but whose HTTP does not answer. Bare MqttUser was such a field (it is admin-only in the console, and
+// the router took that for a write). A new field whose bare query is not routed as a read fails here.
+func TestWholeSettingsReadGoesOverMQTT(t *testing.T) {
+	g := newReadsRig(t)
+	m := settings.New(settings.Options{Devices: g, Client: g.router})
+	if _, err := m.Read(t.Context(), g.dev.ID); err != nil {
+		t.Fatal(err)
+	}
+	h, mq := g.sent()
+	if len(h) != 0 {
+		t.Errorf("HTTP was used: %v", h)
+	}
+	if !slices.Contains(mq, "MqttUser") {
+		t.Errorf("MqttUser was not read over MQTT: %v", mq)
 	}
 }
