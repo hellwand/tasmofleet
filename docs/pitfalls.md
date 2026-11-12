@@ -13,8 +13,9 @@ means nothing stops you: you have to know it. The full working rules are in
   unsigned commits, so `main` got two of them and had to be repaired by hand.
 - **Rule:** merge only by a fast-forward push of the green PR head
   (`git push origin <branch>:main`). Never use a merge button.
-- **Enforced:** ruleset `main` (signed commits, linear history, `required`). The
-  button still exists, so the rule is also a convention.
+- **Enforced:** ruleset `main` (signed commits, linear history, `required`); ruleset
+  `main: CI must be green (no bypass)` (`required`, no admin bypass). The button still exists, so
+  the rule is also a convention.
 
 ### Local gates ignored uncommitted work (#481)
 

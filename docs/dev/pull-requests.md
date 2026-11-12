@@ -4,8 +4,10 @@ Part of the working guide: start at [CLAUDE.md](../../CLAUDE.md).
 
 ## Pull requests and the protected main
 
-`main` is protected on GitHub by the ruleset `main`: no force pushes, no deletion, linear
-history, signed commits, PR and the status check `required` from `pr.yml`. Every change,
+`main` is protected on GitHub by two rulesets. The ruleset `main`: no force pushes, no deletion,
+linear history, signed commits, PR and the status check `required` from `pr.yml`; repository
+admins bypass it. The ruleset `main: CI must be green (no bypass)` (#709) holds only the status
+check `required` (strict) and has no bypass actors, so it applies to admins too. Every change,
 docs-only ones included, goes through a pull request: branch, push, open a PR against `main`,
 wait until CI is green on the PR, then the maintainer merges it **fast-forward only** by
 pushing the PR head to `main`, so the commits keep their own signatures:
@@ -15,9 +17,14 @@ git fetch origin && git rebase origin/main   # if main moved: rebase, re-sign, p
 git push origin <branch>:main                # ff push of the green PR head; GitHub marks the PR merged
 ```
 
-Only repository admins may push to `main` (ruleset bypass), and only a PR head whose `required`
-check is green. If `main` moved, the branch is rebased (and re-signed), pushed and must be green
-again before the fast-forward push; there is no other merge path. Never merge through the GitHub
+Only repository admins may push to `main` (bypass of the ruleset `main`), and only a commit whose
+`required` check is green: the second ruleset makes GitHub refuse the push (`GH013`)
+until `required` has passed on exactly the pushed commit. In a merge train
+that is the train's tip, the PR head that ran CI; the release commit rides on it, so releases need
+nothing extra. If `main` moved, the branch is rebased (and re-signed), pushed and must be green
+again before the fast-forward push; there is no other merge path. A repair that cannot get a green
+`required` first (an emergency force push) needs a repository admin to set the second ruleset to disabled deliberately
+and back to active right after. Never merge through the GitHub
 button: the only method enabled there is rebase, and GitHub's rebase commits are unsigned, so
 the ruleset rejects them.
 `pr.yml` runs the FAST tier on every PR: a `changes` job detects docs-only PRs (heavy jobs
