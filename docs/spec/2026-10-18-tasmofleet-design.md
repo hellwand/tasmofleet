@@ -230,6 +230,7 @@ Tables (35 migrations, `0001` to `0035`; the files in `internal/store/migrations
 | `principals`, `user_prefs`                           | SSO and proxy users seen at sign-in; per-user UI preferences                            | roles of principals are a record of the last sign-in                                                                                                                              |
 | `discovery_proposals`, `device_macs`                 | discovered devices waiting for an admin (expire after 30 days); the MAC set of a device |                                                                                                                                                                                   |
 | `restore_jobs`, `firmware_custom`, `backup_attempts` | restores; provenance of uploaded firmware; failed backups                               |                                                                                                                                                                                   |
+| `id_high_water`                                      | last id handed out for `devices` and `ota_batches`                                      | migration 0047 (#498): an id is never handed out twice, because the audit log, links and notifications name devices and transactions by id                                        |
 
 Timestamps are INTEGER unix milliseconds, UTC. JSON columns (`tags`, `identity_before`,
 `principal`, `detail`) are plain TEXT, encoded and decoded in `store`.

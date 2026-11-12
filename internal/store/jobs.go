@@ -73,13 +73,12 @@ func (s *SQLite) createBatch(ctx context.Context, createdBy string, retryOf mode
 	}
 	defer tx.Rollback() //nolint:errcheck // no-op after commit; on failure the original error is returned
 	now := toMS(s.now())
-	res, err := tx.ExecContext(ctx, "INSERT INTO ota_batches (created_by, created_at, retry_of) VALUES (?,?,?)", createdBy, now, retryOf)
-	if err != nil {
-		return 0, nil, mapErr(err)
-	}
-	bid, err := res.LastInsertId()
+	bid, err := nextID(ctx, tx, nextBatchIDQuery)
 	if err != nil {
 		return 0, nil, err
+	}
+	if _, err := tx.ExecContext(ctx, "INSERT INTO ota_batches (id, created_by, created_at, retry_of) VALUES (?,?,?,?)", bid, createdBy, now, retryOf); err != nil {
+		return 0, nil, mapErr(err)
 	}
 	ids := make([]model.JobID, 0, len(jobs))
 	for _, j := range jobs {
