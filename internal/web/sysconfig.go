@@ -559,8 +559,10 @@ const mqttTestHelp = "Tries one connection with the values above and saves nothi
 
 // sysTestFragment answers the script-driven test button (HX-Request) with only the test row. The
 // page stays as it is, so a password typed into the form survives the test and reaches the save
-// that follows; a full reload would blank it, because a secret is never rendered back.
-func (h *handler) sysTestFragment(w http.ResponseWriter, r *http.Request, msg string, err error) {
+// that follows; a full reload would blank it, because a secret is never rendered back. The row
+// is the one of the button that was pressed (label, action, what, help as on the page), so a
+// button never swaps in another test's row (#705).
+func (h *handler) sysTestFragment(w http.ResponseWriter, r *http.Request, msg string, err error, label, action, what, help string) {
 	var ve *sysconfig.ValidationError
 	switch {
 	case err == nil:
@@ -576,7 +578,17 @@ func (h *handler) sysTestFragment(w http.ResponseWriter, r *http.Request, msg st
 		h.fail(w, r, err)
 		return
 	}
-	h.component(w, r, http.StatusOK, sysTestRow("Test connection", httpBase(r)+sysPath+"/mqtt-test?tab=mqtt", "MQTT connection test", msg, mqttTestHelp, ""))
+	h.component(w, r, http.StatusOK, sysTestRow(label, action, what, msg, help, ""))
+}
+
+// sysMQTTFragment and sysSSOFragment are the rows of the two test buttons that answer with
+// sysTestFragment; they must match the rows in syssettings.templ.
+func (h *handler) sysMQTTFragment(w http.ResponseWriter, r *http.Request, msg string, err error) {
+	h.sysTestFragment(w, r, msg, err, "Test connection", httpBase(r)+sysPath+"/mqtt-test?tab=mqtt", "MQTT connection test", mqttTestHelp)
+}
+
+func (h *handler) sysSSOFragment(w http.ResponseWriter, r *http.Request, msg string, err error) {
+	h.sysTestFragment(w, r, msg, err, "Test discovery", httpBase(r)+sysPath+"/sso-test?tab=signin", "SSO check", "Saves nothing.")
 }
 
 // sysMQTTTest checks the broker. The "Test MQTT" button sits in the MQTT tab of the settings
@@ -591,7 +603,7 @@ func (h *handler) sysMQTTTest(w http.ResponseWriter, r *http.Request) {
 	htmx := r.Header.Get("HX-Request") != ""
 	if err := composeMQTTURL(all, extra, h.storedMQTTURL()); err != nil {
 		if htmx {
-			h.sysTestFragment(w, r, "", err)
+			h.sysMQTTFragment(w, r, "", err)
 			return
 		}
 		h.sysOutcome(w, r, all, err, nil)
@@ -613,7 +625,7 @@ func (h *handler) sysMQTTTest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if htmx {
-		h.sysTestFragment(w, r, msg, err)
+		h.sysMQTTFragment(w, r, msg, err)
 		return
 	}
 	h.sysOutcome(w, r, values, err, func() {
@@ -700,6 +712,10 @@ func (h *handler) sysSSOTest(w http.ResponseWriter, r *http.Request) {
 	msg, err := h.d.SysConfig.TestSSO(r.Context(), sysconfig.TestRequest{Actor: actor(r), Values: values, Audit: h.d.Recorder})
 	if errors.Is(err, sysconfig.ErrNoTester) {
 		http.NotFound(w, r)
+		return
+	}
+	if r.Header.Get("HX-Request") != "" {
+		h.sysSSOFragment(w, r, msg, err)
 		return
 	}
 	h.sysOutcome(w, r, values, err, func() {

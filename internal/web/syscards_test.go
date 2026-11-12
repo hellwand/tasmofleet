@@ -1,6 +1,11 @@
 package web
 
 import (
+	"context"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
+	"net/netip"
 	"net/url"
 	"os"
 	"regexp"
@@ -8,6 +13,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/hellwand/tasmofleet/internal/auth"
 	"github.com/hellwand/tasmofleet/internal/config"
 	"github.com/hellwand/tasmofleet/internal/sysconfig"
 	"github.com/hellwand/tasmofleet/internal/web/ui"
@@ -445,6 +451,46 @@ func TestSystemSettingsSSOTestAcceptsTheWholeForm(t *testing.T) {
 		"mqtt.host": {"broker.lan"}, "mqtt.port": {"1883"}})
 	if r.StatusCode != 200 || !strings.Contains(body, "discovery OK") {
 		t.Fatalf("status %d", r.StatusCode)
+	}
+}
+
+// Why (#718): the help under Issuer URL said "With the trailing slash.", which is Authentik's form
+// and not a rule. Discovery compares the issuer with the "issuer" of the provider's discovery
+// document exactly, at the test button and at start, so a provider whose issuer has no slash
+// (Keycloak's realm URL is said to be one) fails once the help's advice is followed. The first half
+// shows that rule against a provider without a slash; the second keeps the copy telling it: the
+// value is exactly what the provider publishes, and a slash is named only as a provider's detail.
+func TestIssuerHelpDoesNotPrescribeATrailingSlash(t *testing.T) {
+	var idp *httptest.Server
+	idp = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/realms/home/.well-known/openid-configuration" {
+			http.NotFound(w, r)
+			return
+		}
+		_, _ = fmt.Fprintf(w, `{"issuer":%q,"authorization_endpoint":%q,"token_endpoint":%q,"jwks_uri":%q}`,
+			idp.URL+"/realms/home", idp.URL+"/auth", idp.URL+"/token", idp.URL+"/keys")
+	}))
+	t.Cleanup(idp.Close)
+	anyAddr := func(netip.Addr) bool { return true } // the provider is a loopback listener of this test
+	if _, err := auth.CheckIssuer(context.Background(), idp.URL+"/realms/home", anyAddr); err != nil {
+		t.Fatalf("the issuer exactly as published must pass discovery: %v", err)
+	}
+	if _, err := auth.CheckIssuer(context.Background(), idp.URL+"/realms/home/", anyAddr); err == nil {
+		t.Fatal("a slash added to a published issuer without one must fail discovery")
+	}
+
+	f, _ := sysconfig.Lookup("OIDC_ISSUER")
+	card := sysFieldCopy("OIDC_ISSUER")
+	for name, text := range map[string]string{"card help": card.Help, "card info": card.Info, "field help": f.Help} {
+		if strings.Contains(strings.ToLower(text), "with the trailing slash") {
+			t.Errorf("%s still prescribes the slash: %q", name, text)
+		}
+		if strings.Contains(text, "slash") && !strings.Contains(text, "Authentik") {
+			t.Errorf("%s names the trailing slash without saying it is Authentik's form: %q", name, text)
+		}
+		if !strings.Contains(text, "issuer") {
+			t.Errorf("%s must say the value is the issuer the provider publishes: %q", name, text)
+		}
 	}
 }
 

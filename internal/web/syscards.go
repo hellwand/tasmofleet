@@ -338,7 +338,7 @@ var sysCopies = map[string]sysCopy{
 	"OTA_RESTORE_OTAURL": {Help: "Device gets its previous update address back.", Width: "full"},
 
 	"AUTH_MODE":           {Width: "full"},
-	"OIDC_ISSUER":         {Help: "With the trailing slash.", Width: "full"},
+	"OIDC_ISSUER":         {Help: "Exactly the issuer your identity provider publishes.", Width: "full", Info: "Must equal the issuer in the provider's discovery document (/.well-known/openid-configuration), character for character. Authentik's ends with a slash, e.g. https://auth.example/application/o/tasmofleet/; with another provider the slash may be missing, and adding it makes discovery fail."},
 	"OIDC_CLIENT_ID":      {Help: "Registered for TasmoFleet at your IdP.", Width: "full"},
 	"OIDC_CLIENT_SECRET":  {Help: "Write-only.", Width: "half", Info: "Sent only to the issuer it was entered for. Change the issuer and the secret must be entered again."},
 	"OIDC_SCOPES":         {Help: "Comma separated.", Width: "half"},

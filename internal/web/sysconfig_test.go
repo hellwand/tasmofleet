@@ -291,6 +291,57 @@ func TestSystemSettingsSSOTest(t *testing.T) {
 	}
 }
 
+// Why (#705): "Test discovery" posts with htmx and swaps its own row (sysTestRow), but the
+// handler answered with the complete settings page, so the page was drawn a second time inside
+// the Identity provider card, on every click and whatever the issuer was. Like the MQTT and
+// notification tests it must answer with the row only: the person keeps the form as typed, the
+// button comes back so a second click works, and a failure still reads as an alert. Each case
+// gets its own environment because the service allows one test per few seconds.
+func TestSystemSettingsSSOTestAnswersTheRowOnlyWithScripts(t *testing.T) {
+	refused := func(context.Context, string) (string, error) { return "", errors.New("discovery refused") }
+	issuer := url.Values{"csrf": {"tok"}, "v.OIDC_ISSUER": {"https://idp.example/"}}
+	for _, c := range []struct {
+		name   string
+		tester func(context.Context, string) (string, error)
+		form   url.Values
+		twice  bool
+		want   string
+		failed bool
+	}{
+		{"discovery works", nil, issuer, false, "SSO check: discovery OK", false},
+		{"discovery fails", refused, issuer, false, "SSO check: failed: discovery refused", true},
+		{"no issuer entered", nil, url.Values{"csrf": {"tok"}, "v.OIDC_ISSUER": {""}}, false, "SSO check: failed: enter an issuer URL to test", true},
+		{"second test too soon", nil, issuer, true, "SSO check: failed: wait a few seconds between connection tests", true},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			e, _, _, _ := sysEnvTesters(t, true, nil, c.tester, nil)
+			if c.twice {
+				e.do(t, "POST", "/settings/system/sso-test", "admin", c.form, "HX-Request", "true")
+			}
+			r, body := e.do(t, "POST", "/settings/system/sso-test", "admin", c.form, "HX-Request", "true")
+			if r.StatusCode != 200 {
+				t.Fatalf("status %d: %s", r.StatusCode, body)
+			}
+			if strings.Contains(body, "<html") || strings.Contains(body, "<form") {
+				t.Fatalf("an htmx test must answer with the test row only, got a page of %d bytes", len(body))
+			}
+			if !strings.Contains(body, c.want) {
+				t.Errorf("the row lacks %q: %s", c.want, body)
+			}
+			if !strings.Contains(body, `hx-post="/tf/settings/system/sso-test?tab=signin"`) {
+				t.Errorf("the button must come back with its action, or a second click does nothing: %s", body)
+			}
+			tone := `<span class="sys-test-res t-ok" role="status">`
+			if c.failed {
+				tone = `<span class="sys-test-res t-danger" role="alert">`
+			}
+			if !strings.Contains(body, tone) {
+				t.Errorf("wrong tone, want %s: %s", tone, body)
+			}
+		})
+	}
+}
+
 // Why: "Test MQTT" is a button of the settings form, so the whole form arrives with it; the
 // test must use the broker fields only and never save the other values that came along.
 func TestSystemSettingsMQTTTestIgnoresTheRestOfTheForm(t *testing.T) {
