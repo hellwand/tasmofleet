@@ -80,21 +80,35 @@ func (a *runtime) updateMetrics(ctx context.Context) {
 	}
 	std.SetDevices(samples)
 
-	var latest []metrics.BackupSample // the newest backup of every device that has one
-	for _, d := range devs {
-		bs, err := a.backups.List(ctx, d.ID)
-		if err != nil || len(bs) == 0 {
-			continue
-		}
-		latest = append(latest, metrics.BackupSample{ID: int64(d.ID), Name: d.Name, Taken: bs[0].TakenAt})
-	}
-	std.SetBackupAges(latest, a.svc.Sys.Snapshot().MetricsDeviceLabels)
+	std.SetBackupAges(backupSamples(ctx, devs, a.backups), a.svc.Sys.Snapshot().MetricsDeviceLabels)
 	if a.cache != nil {
 		std.FirmwareCache.With().Set(float64(dirSize(filepath.Join(a.cfg.DataDir, "firmware"))))
 	}
 	if jobs, err := a.svc.Store.ActiveJobs(ctx); err == nil {
 		std.OTAJobsActive.With().Set(float64(len(jobs)))
 	}
+}
+
+// backupLister is the part of backup.Manager that backupSamples reads.
+type backupLister interface {
+	List(ctx context.Context, id model.DeviceID) ([]model.Backup, error)
+}
+
+// backupSamples returns the newest own backup of every device that has one: a
+// run of replacement hardware filed under the device (Replace device) is not
+// its backup, so a device with only such runs has no sample.
+func backupSamples(ctx context.Context, devs []model.Device, l backupLister) []metrics.BackupSample {
+	var latest []metrics.BackupSample
+	for _, d := range devs {
+		bs, err := l.List(ctx, d.ID)
+		if err != nil {
+			continue
+		}
+		if taken, ok := backup.NewestOwnRun(bs); ok {
+			latest = append(latest, metrics.BackupSample{ID: int64(d.ID), Name: d.Name, Taken: taken})
+		}
+	}
+	return latest
 }
 
 // deviceSamples joins the inventory with the health cache. Pure: no I/O.

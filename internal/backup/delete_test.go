@@ -225,3 +225,48 @@ func TestDeletingBackupsPublishesABackupEvent(t *testing.T) {
 		}
 	}
 }
+
+// Why (#545): "Replace device" files the safety backup of the replacement
+// hardware under the dead device. The age of "the device's last backup" (the
+// metrics gauge and its alert) must come from the device's own runs: counting
+// the replacement's dump would report a fresh backup of a device that has not
+// been backed up since before the failure.
+func TestNewestOwnRunSkipsReplacementHardwareRuns(t *testing.T) {
+	t1 := time.Date(2026, 11, 1, 3, 0, 0, 0, time.UTC)
+	t2 := t1.Add(24 * time.Hour)
+	own := func(at time.Time, k model.BackupKind) model.Backup {
+		return model.Backup{DeviceID: 7, Kind: k, TakenAt: at, Trigger: model.TriggerScheduled}
+	}
+	spare := func(at time.Time, k model.BackupKind, note string) model.Backup {
+		return model.Backup{DeviceID: 7, Kind: k, TakenAt: at, Trigger: model.TriggerManual, Note: note}
+	}
+	for _, tc := range []struct {
+		name   string
+		list   []model.Backup
+		want   time.Time
+		wantOK bool
+	}{
+		{"replacement run newer than the own run", []model.Backup{
+			spare(t2, model.BackupConfigDump, NoteReplacementHardware), own(t1, model.BackupConfigDump)}, t1, true},
+		{"own runs only: the newest", []model.Backup{
+			own(t2, model.BackupConfigDump), own(t1, model.BackupConfigDump)}, t2, true},
+		{"the marker sits on the dump only; its snapshot twin is part of the same run", []model.Backup{
+			spare(t2, model.BackupSnapshot, ""), spare(t2, model.BackupConfigDump, NoteReplacementHardware),
+			own(t1, model.BackupSnapshot), own(t1, model.BackupConfigDump)}, t1, true},
+		{"order of the list does not matter", []model.Backup{
+			own(t1, model.BackupConfigDump), spare(t2, model.BackupConfigDump, NoteReplacementHardware)}, t1, true},
+		{"only replacement runs: no own run", []model.Backup{
+			spare(t2, model.BackupConfigDump, NoteReplacementHardware)}, time.Time{}, false},
+		{"empty list", nil, time.Time{}, false},
+		{"a bulk label that reads like the marker is the device's own run", []model.Backup{
+			{DeviceID: 7, Kind: model.BackupConfigDump, TakenAt: t2, Trigger: model.TriggerBulk, Note: NoteReplacementHardware},
+			own(t1, model.BackupConfigDump)}, t2, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got, ok := NewestOwnRun(tc.list)
+			if ok != tc.wantOK || !got.Equal(tc.want) {
+				t.Errorf("NewestOwnRun = %v, %v; want %v, %v", got, ok, tc.want, tc.wantOK)
+			}
+		})
+	}
+}

@@ -1,10 +1,14 @@
 package app
 
 import (
+	"context"
 	"reflect"
 	"testing"
+	"time"
 
+	"github.com/hellwand/tasmofleet/internal/backup"
 	"github.com/hellwand/tasmofleet/internal/health"
+	"github.com/hellwand/tasmofleet/internal/metrics"
 	"github.com/hellwand/tasmofleet/internal/model"
 )
 
@@ -61,5 +65,37 @@ func TestDeviceSamplesIgnoreSensorReadings(t *testing.T) {
 	b := deviceSamples(devs, all, map[model.DeviceID]health.Telemetry{1: with})
 	if !reflect.DeepEqual(a, b) {
 		t.Fatalf("sensor readings changed the metric samples:\n%+v\n%+v", a, b)
+	}
+}
+
+type fakeBackupList map[model.DeviceID][]model.Backup
+
+func (f fakeBackupList) List(_ context.Context, id model.DeviceID) ([]model.Backup, error) {
+	return f[id], nil
+}
+
+// Why (#545): the backup age gauge says how long a device has gone without a
+// backup. After "Replace device" the newest file filed under the old device
+// can be the replacement hardware's safety backup; the gauge must still show
+// the device's own last backup, and a device that only has replacement runs
+// has no backup age at all (an absent series, not a fresh one).
+func TestBackupSamplesUseTheDevicesOwnNewestRun(t *testing.T) {
+	t1 := time.Date(2026, 11, 1, 3, 0, 0, 0, time.UTC)
+	t2 := t1.Add(24 * time.Hour)
+	devs := []model.Device{{ID: 1, Name: "replaced"}, {ID: 2, Name: "plain"}, {ID: 3, Name: "only-spare"}, {ID: 4, Name: "none"}}
+	spare := func(at time.Time) model.Backup {
+		return model.Backup{Kind: model.BackupConfigDump, TakenAt: at, Trigger: model.TriggerManual, Note: backup.NoteReplacementHardware}
+	}
+	own := func(at time.Time) model.Backup {
+		return model.Backup{Kind: model.BackupConfigDump, TakenAt: at, Trigger: model.TriggerScheduled}
+	}
+	got := backupSamples(t.Context(), devs, fakeBackupList{
+		1: {spare(t2), own(t1)},
+		2: {own(t2), own(t1)},
+		3: {spare(t2)},
+	})
+	want := []metrics.BackupSample{{ID: 1, Name: "replaced", Taken: t1}, {ID: 2, Name: "plain", Taken: t2}}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("samples = %+v\nwant     %+v", got, want)
 	}
 }

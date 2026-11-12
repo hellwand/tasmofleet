@@ -34,6 +34,28 @@ func NewestRun(list []model.Backup) time.Time {
 	return newest
 }
 
+// NewestOwnRun returns the TakenAt of the newest run of list that belongs to
+// the device itself (any order), and false when there is none. A run with a
+// file of replacement hardware (IsReplacementHardware: the safety backup of
+// "Replace device", filed under the dead device) is not the device's own; the
+// whole run is skipped, as Prunable counts it apart.
+func NewestOwnRun(list []model.Backup) (time.Time, bool) {
+	spare := map[time.Time]bool{}
+	for _, b := range list {
+		if IsReplacementHardware(b) {
+			spare[b.TakenAt] = true
+		}
+	}
+	var newest time.Time
+	found := false
+	for _, b := range list {
+		if !spare[b.TakenAt] && (!found || b.TakenAt.After(newest)) {
+			newest, found = b.TakenAt, true
+		}
+	}
+	return newest, found
+}
+
 // IsNewestRun reports whether b belongs to the newest run of list.
 func IsNewestRun(list []model.Backup, b model.Backup) bool {
 	return b.TakenAt.Equal(NewestRun(list))
