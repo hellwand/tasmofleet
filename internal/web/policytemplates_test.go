@@ -3,9 +3,11 @@ package web
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net"
 	"net/netip"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -17,6 +19,7 @@ import (
 	"github.com/hellwand/tasmofleet/internal/simulator"
 	"github.com/hellwand/tasmofleet/internal/sysconfig"
 	"github.com/hellwand/tasmofleet/internal/tasmota"
+	"github.com/hellwand/tasmofleet/internal/transport"
 )
 
 // templateWant is the value an admin types into a template whose Want is blank, in the form
@@ -256,5 +259,65 @@ func TestBlankWantTemplatesAreNotOfferedWhereTheyWouldBeSavedAtOnce(t *testing.T
 	}
 	if strings.Contains(page, "NtpServer1 =") || strings.Contains(page, "OtaUrl =") {
 		t.Error("a template without a value shows the command with a dangling =")
+	}
+}
+
+// sentCommands records what the settings reader sends and answers every command as unknown, so the reader goes on
+// to the next key and every command it would send is seen.
+type sentCommands struct{ cmds []string }
+
+func (s *sentCommands) Command(_ context.Context, _ tasmota.Target, cmnd string) (json.RawMessage, error) {
+	s.cmds = append(s.cmds, cmnd)
+	return nil, tasmota.ErrUnknownCommand
+}
+
+func (s *sentCommands) DownloadConfig(context.Context, tasmota.Target) ([]byte, error) {
+	return nil, errors.New("not used")
+}
+
+func (s *sentCommands) RootPage(context.Context, tasmota.Target) (tasmota.RootInfo, error) {
+	return tasmota.RootInfo{}, errors.New("not used")
+}
+
+// Why (#711): the Settings tab and the policy reads send one bare command per setting, and the transport routes
+// a read MQTT first. A bare command it takes for a write goes over HTTP first, and on a device that is online on
+// the broker but whose HTTP does not answer, that read fails (OtaUrl, the PowerRetain template). Every command
+// these reads send, for every curated setting, every template and the issue's generic examples, must be routed
+// as a read; the same command with a value or inside a Backlog stays a write.
+func TestEveryBareCommandTheSettingsAndPolicyReadsSendIsRoutedAsARead(t *testing.T) {
+	keys := []string{"LogHost", "SwitchMode1"} // generic rules checked in the Tasmota source (cmdpolicy.reportsWhenBare)
+	for _, f := range settings.Fields {
+		if !f.Secret {
+			keys = append(keys, f.Key)
+		}
+	}
+	for _, tp := range policyTemplates("mqtt.lab.home") {
+		keys = append(keys, tp.Spec.Command)
+	}
+	sent := &sentCommands{}
+	rd := settings.New(settings.Options{Devices: oneDevice{"127.0.0.1", 80}, Client: sent})
+	for _, k := range keys {
+		if _, err := rd.ReadKeys(t.Context(), 1, []string{k}); err != nil {
+			t.Fatalf("ReadKeys(%s): %v", k, err)
+		}
+	}
+	for _, want := range []string{"OtaUrl", "PowerRetain", "LogHost", "SwitchMode1", "Status", "Status 3"} {
+		if !slices.Contains(sent.cmds, want) {
+			t.Fatalf("the reads never sent %q: %v", want, sent.cmds)
+		}
+	}
+	for _, c := range sent.cmds {
+		if got := transport.CommandAction(c); got != transport.ActCommands {
+			t.Errorf("CommandAction(%q) = %s: the read goes over HTTP first", c, got)
+		}
+		if got := transport.CommandAction("Backlog " + c); got != transport.ActWrites {
+			t.Errorf("CommandAction(Backlog %s) = %s, want writes", c, got)
+		}
+		if strings.HasPrefix(c, "Status") {
+			continue // Status 1 is a read too
+		}
+		if got := transport.CommandAction(c + " 1"); got != transport.ActWrites {
+			t.Errorf("CommandAction(%s 1) = %s, want writes", c, got)
+		}
 	}
 }

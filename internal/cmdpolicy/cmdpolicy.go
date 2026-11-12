@@ -134,24 +134,44 @@ var queryNames = map[string]bool{
 	"longitude": true, "tempoffset": true, "ledstate": true,
 }
 
-// reportsWhenBare are admin-only for the role gate (P5: a bare MqttUser names the broker login) but change
-// nothing when sent without arguments: CmndMqttUser (xdrv_02_9_mqtt.ino, Tasmota 12.5.0 and 16.0.0) stores a
-// value and sets restart_flag only when data_len > 0, and otherwise only answers the current value. So the
-// transport may route the bare form like a read (#702); who may send it stays Classify's verdict.
-var reportsWhenBare = map[string]bool{"mqttuser": true}
+// reportsWhenBare are admin-only for the role gate (not queryNames: an operator may not send them and their
+// arguments stay out of logs, see P5 and L1) but change nothing when sent without arguments, so the transport may
+// route the bare form like a read (#702, #711): MQTT first, and over HTTP a second time when MQTT gets no answer.
+// That second send is why only names checked in the Tasmota source belong here, never a rule by pattern: a bare
+// command has data_len 0 and payload -99 (CommandHandler, support_command.ino, 16.0.0 lines 458-466, 12.5.0 lines
+// 422-430), and each handler below changes something only for data or a payload in range, and otherwise only
+// answers. maxIndex is the highest index whose reply carries that index, so the MQTT channel matches it (keyNames
+// in mqttcmd); 0 means only the plain name, because the reply comes under the plain key ("OtaUrl" for OtaUrl2).
+var reportsWhenBare = map[string]struct{ maxIndex int }{
+	// CmndMqttUser (xdrv_02_9_mqtt.ino, 12.5.0 and 16.0.0): stores a value and restarts only when data_len > 0.
+	"mqttuser": {},
+	// CmndOtaUrl (support_command.ino, 16.0.0 lines 1358-1364, 12.5.0 lines 1100-1106): stores only when
+	// data_len > 0, answers {"OtaUrl":"..."}. Status 1 (StatusPRM) carries the same value and is read over MQTT.
+	"otaurl": {},
+	// CmndPowerRetain (xdrv_02_9_mqtt.ino, 16.0.0 lines 2146-2163, 12.5.0 lines 1643-1660): clears the retained
+	// relay states and stores only for payload 0 or 1, answers {"PowerRetain":"OFF"}.
+	"powerretain": {},
+	// CmndLoghost (support_command.ino, 16.0.0 lines 2388-2394, 12.5.0 lines 1977-1983): stores only when
+	// data_len > 0, answers {"LogHost":"..."}.
+	"loghost": {},
+	// CmndSwitchMode (support_command.ino, 16.0.0 lines 2612-2620, 12.5.0 lines 2162-2170): index 1 to
+	// MAX_SWITCHES_SET stores only for a payload in range and answers with its index, {"SwitchMode1":0}; a bare
+	// SwitchMode is index 1. MAX_SWITCHES_SET is 28 in 12.5.0 (a higher index answers nothing there) and 32 in
+	// 16.0.0, so only 1 to 28 are routed as reads. SwitchMode0 (every switch, answered as an array) stays a write.
+	"switchmode": {maxIndex: 28},
+}
 
-// ReportsOnly reports whether cmd only makes the device answer and changes nothing: a read-class command,
-// or a bare name of reportsWhenBare without an index. An indexed spelling (MqttUser2) also only reports, but
-// Tasmota answers it under the plain key, which the MQTT channel would not match to the index; no caller
-// needs it, so it stays a write. It decides how a command is routed (read or write), never who may send it:
-// that is Classify and Authorize. It reads the command exactly like Classify, so callers never parse commands
+// ReportsOnly reports whether cmd only makes the device answer and changes nothing: a read-class command, or a
+// bare name of reportsWhenBare, numbered only where the reply carries the number (written as Tasmota writes it
+// back: SwitchMode1, not SwitchMode01). It decides how a command is routed (read or write), never who may send
+// it: that is Classify and Authorize. It reads the command exactly like Classify, so callers never parse commands
 // themselves (P7).
 func ReportsOnly(cmd string) bool {
 	p, bad := parse(cmd)
 	if bad != "" {
 		return false
 	}
-	if p.args == "" && !p.has && reportsWhenBare[p.base] {
+	if r, ok := reportsWhenBare[p.base]; ok && p.args == "" && (!p.has || p.idx >= 1 && p.idx <= r.maxIndex && p.plainIndex()) {
 		return true
 	}
 	v, bad := classify(p)
@@ -640,6 +660,11 @@ func Canonical(cmd string) (string, error) {
 		return "", fmt.Errorf("%w: %s", ErrInvalid, bad)
 	}
 	return p.canonical(), nil
+}
+
+// plainIndex reports whether the index is written the way Tasmota writes it in a reply: no leading zero.
+func (p parsed) plainIndex() bool {
+	return p.name[len(strings.TrimRight(p.name, "0123456789")):] == strconv.Itoa(p.idx)
 }
 
 func (p parsed) canonical() string {

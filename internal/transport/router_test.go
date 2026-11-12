@@ -325,6 +325,22 @@ func TestCommandActionIsWhatTheRouterDoes(t *testing.T) {
 		{"MqttUser bob", ActWrites},
 		{"Backlog MqttUser", ActWrites},
 		{"MqttPassword", ActWrites}, // not on the list: a bare MqttPassword stays a write
+		// #711: the bare reads of a policy rule (OtaUrl, the PowerRetain template, LogHost, SwitchMode<n>) only
+		// report; set, numbered differently or inside a Backlog they change the device. OtaUrl with a URL stays a
+		// write and never becomes a job: it only prepares an update.
+		{"OtaUrl", ActCommands},
+		{"PowerRetain", ActCommands},
+		{"LogHost", ActCommands},
+		{"SwitchMode1", ActCommands},
+		{"OtaUrl 1", ActWrites},
+		{"PowerRetain 1", ActWrites},
+		{"LogHost syslog.lan", ActWrites},
+		{"SwitchMode1 2", ActWrites},
+		{"SwitchMode01", ActWrites},
+		{"OtaUrl2", ActWrites},
+		{"Backlog OtaUrl", ActWrites},
+		{"Backlog PowerRetain", ActWrites},
+		{"LogPort", ActWrites}, // a generic name nobody checked in the source stays a write
 	} {
 		if got := CommandAction(c.cmd); got != c.want {
 			t.Errorf("CommandAction(%q) = %s, want %s", c.cmd, got, c.want)

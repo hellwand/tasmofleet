@@ -300,10 +300,64 @@ func TestReportsOnly(t *testing.T) {
 		"MqttUser\u200b":     false, // malformed
 		"":                   false,
 		"Status 2;Restart 1": false,
+		// #711: the bare reads of the curated OtaUrl and the policy templates and examples, checked in the Tasmota
+		// source (reportsWhenBare). With a value, numbered or inside a Backlog they stay writes.
+		"OtaUrl":                       true,
+		"otaurl":                       true,
+		"PowerRetain":                  true,
+		"LogHost":                      true,
+		"SwitchMode":                   true, // Tasmota reads it as SwitchMode1 and answers {"SwitchMode1":n}
+		"SwitchMode1":                  true,
+		"switchmode28":                 true,
+		"SwitchMode0":                  false, // all switches at once, answered as an array: not needed
+		"SwitchMode29":                 false, // beyond MAX_SWITCHES_SET of 12.5.0 (28), which answers nothing
+		"SwitchMode01":                 false, // Tasmota answers SwitchMode1, which the MQTT channel would not match to 01
+		"SwitchMode1 2":                false,
+		"OtaUrl2":                      false, // answered under the plain key "OtaUrl"
+		"PowerRetain1":                 false,
+		"LogHost1":                     false,
+		"OtaUrl http://ota.lan/fw":     false, // redirects the next firmware update
+		"OtaUrl 1":                     false, // resets the URL to the build's default
+		"PowerRetain 0":                false, // clears the retained relay states on the broker
+		"LogHost 0":                    false,
+		"Backlog OtaUrl":               false,
+		"Backlog PowerRetain; LogHost": false,
+		"LogPort":                      false, // a generic name nobody checked stays a write
+		"SwitchTopic":                  false,
 	} {
 		if got := ReportsOnly(cmd); got != want {
 			t.Errorf("ReportsOnly(%q) = %v, want %v", cmd, got, want)
 		}
+	}
+}
+
+// Why (#711): the transport routes the names of reportsWhenBare like reads (MQTT first, HTTP may be asked a second
+// time), but how a command is routed must never change who may send it or what reaches a log: each stays an admin
+// command, an operator is refused it, its arguments are hidden in logs, and OtaUrl with a URL still starts or
+// redirects a firmware update (safety rule 1). Adding one of them to queryNames would break all of that.
+func TestBareReportsRouteLikeReadsButKeepTheirVerdicts(t *testing.T) {
+	for _, cmd := range []string{"OtaUrl", "PowerRetain", "LogHost", "SwitchMode", "SwitchMode1", "MqttUser"} {
+		if !ReportsOnly(cmd) {
+			t.Errorf("ReportsOnly(%q) = false, want true: the bare form only reports", cmd)
+		}
+		if v, err := Classify(cmd); err != nil || v.Class != ClassAdmin || v.Confirm != "" || v.Redact {
+			t.Errorf("Classify(%q) = %+v, %v; want a plain admin command", cmd, v, err)
+		}
+		if _, err := Authorize(cmd, model.RoleOperator); !errors.Is(err, ErrRole) {
+			t.Errorf("Authorize(%q, operator) = %v, want ErrRole", cmd, err)
+		}
+		if _, err := Authorize(cmd, model.RoleAdmin); err != nil {
+			t.Errorf("Authorize(%q, admin) = %v, want nil", cmd, err)
+		}
+		if got, want := Redacted(cmd+" http://u:p@x/y"), cmd+" ***"; got != want {
+			t.Errorf("Redacted = %q, want %q", got, want)
+		}
+	}
+	if !StartsFirmware("OtaUrl http://ota.lan/fw") || !StartsFirmware("Backlog OtaUrl http://ota.lan/fw") || StartsFirmware("OtaUrl") {
+		t.Error("StartsFirmware must stay true for OtaUrl with a URL, alone or in a Backlog, and false for the bare read")
+	}
+	if v, _ := Classify("OtaUrl http://ota.lan/fw"); v.Class != ClassAdmin || v.Confirm != whyFirmware {
+		t.Errorf("OtaUrl with a URL: %+v, want admin with the firmware confirmation", v)
 	}
 }
 

@@ -296,6 +296,27 @@ func (d *simDevice) settingCmdLocked(base string, idx int, hasIdx bool, data str
 			changed = true
 		}
 		body = []byte(`{"PowerRetain":"` + map[bool]string{true: "ON", false: "OFF"}[d.get(base) == "1"] + `"}`)
+	case "switchmode":
+		// Tasmota CmndSwitchMode (support_command.ino, 16.0.0 lines 2612-2620): index 1..MAX_SWITCHES_SET (32, 28 in
+		// 12.5.0), a bare name is index 1; a value 0..16 (below MAX_SWITCH_OPTION) is stored, anything else only
+		// reports. Answered with the index, {"SwitchMode1":0} (ResponseCmndIdxNumber). SwitchMode0 (every switch,
+		// answered as an array) is not simulated.
+		if !hasIdx {
+			idx = 1
+		}
+		if idx < 1 || idx > 32 {
+			return nil, false
+		}
+		key := "switchmode" + strconv.Itoa(idx)
+		if n, err := strconv.Atoi(data); err == nil && n >= 0 && n <= 16 {
+			d.set(key, strconv.Itoa(n))
+			changed = true
+		}
+		v := d.get(key)
+		if v == "" {
+			v = "0" // SWITCH_MODE TOGGLE (my_user_config.h)
+		}
+		body = []byte(`{"SwitchMode` + strconv.Itoa(idx) + `":` + v + `}`)
 	case "setoption":
 		if !hasIdx {
 			return nil, false

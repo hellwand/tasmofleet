@@ -214,3 +214,23 @@ func TestSimSetOption4DeviceIsReadOverMQTTWithoutTimeoutOrHTTPFallback(t *testin
 		t.Errorf("the device received %d commands, want the one MQTT read: %v", n, g.dev.Commands())
 	}
 }
+
+func TestSimBareSwitchModeIsReadOverMQTTUnderItsIndex(t *testing.T) {
+	// Why (#711): a bare SwitchMode<n> only reports, so it is routed as a read: over MQTT first, and over HTTP a
+	// second time when MQTT gets no answer. That is only right if the command channel matches Tasmota's reply,
+	// which carries the index ({"SwitchMode1":0}, ResponseCmndIdxNumber); otherwise every read would time out,
+	// mark the device and be sent twice. Each switch must get its own value, never another switch's reply.
+	g := newSimRigWith(t, map[string]string{"switchmode1": "2", "switchmode2": "1", "switchmode28": "3"})
+	for cmd, want := range map[string]string{
+		"SwitchMode1":  `{"SwitchMode1":2}`,
+		"SwitchMode2":  `{"SwitchMode2":1}`,
+		"SwitchMode28": `{"SwitchMode28":3}`, // the highest index routed as a read (MAX_SWITCHES_SET of 12.5.0)
+		"SwitchMode":   `{"SwitchMode1":2}`,  // Tasmota reads the bare name as index 1
+	} {
+		ctx, tr := WithTrace(t.Context())
+		raw, err := g.r.Command(ctx, g.target(), cmd)
+		if err != nil || string(raw) != want || tr.Via() != "mqtt" {
+			t.Errorf("%s: %s, %v, via %s; want %s over MQTT only", cmd, raw, err, tr.Via(), want)
+		}
+	}
+}

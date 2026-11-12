@@ -11,6 +11,7 @@ import (
 	"github.com/hellwand/tasmofleet/internal/model"
 	"github.com/hellwand/tasmofleet/internal/mqttbus"
 	"github.com/hellwand/tasmofleet/internal/mqttcmd"
+	"github.com/hellwand/tasmofleet/internal/policy"
 	"github.com/hellwand/tasmofleet/internal/settings"
 	"github.com/hellwand/tasmofleet/internal/simulator"
 	"github.com/hellwand/tasmofleet/internal/tasmota"
@@ -41,11 +42,18 @@ func silentHTTP(t *testing.T) (addr netip.AddrPort, conns *atomic.Int32) {
 	return netip.MustParseAddrPort(ln.Addr().String()), conns
 }
 
-// Why (#702): the device of the report is online on our broker, but its HTTP does not answer. The Settings
-// tab must read it over MQTT, including the identity check production wires (Prober.VerifyRead), without a
-// single HTTP request: one request that times out discards the whole read. Simulated device, real broker,
-// bus, command channel, router and transport facts.
-func TestSettingsReadOfADeviceWhoseHTTPIsSilent(t *testing.T) {
+// silentRig is a simulated device online on a real broker, reached through the real bus, command channel, router
+// and transport facts, whose HTTP address accepts connections and never answers.
+type silentRig struct {
+	st     *gtStore
+	router *transport.Router
+	pr     *Prober
+	ctl    simulator.Controller
+	conns  *atomic.Int32
+}
+
+func newSilentRig(t *testing.T) silentRig {
+	t.Helper()
 	br, err := simulator.StartBroker()
 	if err != nil {
 		t.Fatal(err)
@@ -88,17 +96,55 @@ func TestSettingsReadOfADeviceWhoseHTTPIsSilent(t *testing.T) {
 		BrokerPassword: func() string { return "" }, Now: time.Now})
 	router.SetMQTT(ch)
 	pr := &Prober{Client: router.HTTPOnly(), Reads: router, Gap: time.Millisecond}
-	set := settings.New(settings.Options{Devices: st, Client: router, ReadTimeout: 30 * time.Second, Verify: pr.VerifyRead})
+	return silentRig{st: st, router: router, pr: pr, ctl: ctl, conns: conns}
+}
+
+// Why (#702): the device of the report is online on our broker, but its HTTP does not answer. The Settings
+// tab must read it over MQTT, including the identity check production wires (Prober.VerifyRead), without a
+// single HTTP request: one request that times out discards the whole read. Simulated device, real broker,
+// bus, command channel, router and transport facts.
+func TestSettingsReadOfADeviceWhoseHTTPIsSilent(t *testing.T) {
+	g := newSilentRig(t)
+	set := settings.New(settings.Options{Devices: g.st, Client: g.router, ReadTimeout: 30 * time.Second, Verify: g.pr.VerifyRead})
 
 	vals, err := set.Read(t.Context(), 1)
 	if err != nil {
-		t.Fatalf("Settings read: %v (HTTP connections: %d)", err, conns.Load())
+		t.Fatalf("Settings read: %v (HTTP connections: %d)", err, g.conns.Load())
 	}
-	if n := conns.Load(); n != 0 {
+	if n := g.conns.Load(); n != 0 {
 		t.Errorf("%d HTTP connection(s) to a device MQTT reaches", n)
 	}
 	// the Settings tab is admin-only and shows the login, as it does when the value comes over HTTP
 	if vals["MqttUser"] == "" || vals["MqttUser"] == "***" {
 		t.Errorf("MqttUser = %q, want the device's login", vals["MqttUser"])
+	}
+}
+
+// Why (#711): the policy poller reads a rule by sending its bare command. On a device that is online on our broker
+// but whose HTTP does not answer, an OtaUrl rule (and the PowerRetain template, and a SwitchMode<n> rule) was
+// routed as a write, HTTP first, and the read failed with an HTTP timeout, so the rule could never be judged. It
+// must be read over MQTT without a single HTTP request, and the value must be the device's, not a guess: the
+// reader leaves out what it cannot read, so a missing value would pass silently.
+func TestPolicyReadOfADeviceWhoseHTTPIsSilent(t *testing.T) {
+	g := newSilentRig(t)
+	g.ctl.SetOtaURL("http://ota.lab.test/tasmota32.bin")
+	set := settings.New(settings.Options{Devices: g.st, Client: g.router, ReadTimeout: 30 * time.Second, Verify: g.pr.VerifyRead})
+	rep := &policyReporter{reader: set, verify: g.pr.VerifyRead, now: time.Now, rules: []policy.Rule{
+		{ID: "ota", Command: "OtaUrl", Want: "http://ota.lab.test/tasmota32.bin"},
+		{ID: "retain", Command: "PowerRetain", Want: "1"},
+		{ID: "switch", Command: "SwitchMode1", Want: "0"},
+	}}
+
+	if !rep.readDevice(t.Context(), g.st.devs[0]) {
+		t.Fatalf("the policy read failed (HTTP connections: %d)", g.conns.Load())
+	}
+	if n := g.conns.Load(); n != 0 {
+		t.Errorf("%d HTTP connection(s) to a device MQTT reaches", n)
+	}
+	got := rep.vals.get(1)
+	for cmd, want := range map[string]string{"OtaUrl": "http://ota.lab.test/tasmota32.bin", "PowerRetain": "0", "SwitchMode1": "0"} {
+		if got[cmd].value != want {
+			t.Errorf("%s = %q, want %q", cmd, got[cmd].value, want)
+		}
 	}
 }
