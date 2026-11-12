@@ -8,7 +8,10 @@ package web
 import "github.com/a-h/templ"
 import templruntime "github.com/a-h/templ/runtime"
 
-import "github.com/hellwand/tasmofleet/internal/web/ui"
+import (
+	"github.com/hellwand/tasmofleet/internal/policy"
+	"github.com/hellwand/tasmofleet/internal/web/ui"
+)
 
 // sgView is the style guide's data: the shell data (for the user menu and the drawer shown in
 // the flow), the base path and the CSRF token of the sample forms.
@@ -88,7 +91,7 @@ func styleguidePage(v sgView) templ.Component {
 		var templ_7745c5c3_Var2 string
 		templ_7745c5c3_Var2, templ_7745c5c3_Err = templ.JoinStringErrs(sgTitle("banners"))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/styleguide.templ`, Line: 55, Col: 45}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/styleguide.templ`, Line: 58, Col: 45}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var2))
 		if templ_7745c5c3_Err != nil {
@@ -121,7 +124,7 @@ func styleguidePage(v sgView) templ.Component {
 		var templ_7745c5c3_Var3 string
 		templ_7745c5c3_Var3, templ_7745c5c3_Err = templ.JoinStringErrs(sgTitle("toasts"))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/styleguide.templ`, Line: 63, Col: 43}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/styleguide.templ`, Line: 66, Col: 43}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var3))
 		if templ_7745c5c3_Err != nil {
@@ -150,7 +153,7 @@ func styleguidePage(v sgView) templ.Component {
 		var templ_7745c5c3_Var4 string
 		templ_7745c5c3_Var4, templ_7745c5c3_Err = templ.JoinStringErrs(sgTitle("live"))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/styleguide.templ`, Line: 77, Col: 39}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/styleguide.templ`, Line: 80, Col: 39}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var4))
 		if templ_7745c5c3_Err != nil {
@@ -512,7 +515,7 @@ func styleguidePage(v sgView) templ.Component {
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = ui.Segmented("Severity", "sg-sev", []ui.Option{{Value: "warn", Label: "Advisory"}, {Value: "require", Label: "Required", Checked: true}}).Render(ctx, templ_7745c5c3_Buffer)
+			templ_7745c5c3_Err = ui.Segmented("Severity", "sg-sev", severityOptions(policy.SeverityWarn)).Render(ctx, templ_7745c5c3_Buffer)
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -706,7 +709,7 @@ func styleguidePage(v sgView) templ.Component {
 				}()
 			}
 			ctx = templ.InitializeContext(ctx)
-			templ_7745c5c3_Err = ui.Crumbs([]ui.Crumb{{Label: "Devices", Path: "/styleguide"}, {Label: "Balcony Windowsill", Path: "/styleguide"}}, v.Base).Render(ctx, templ_7745c5c3_Buffer)
+			templ_7745c5c3_Err = ui.CrumbsSample([]ui.Crumb{{Label: "Devices", Path: "/styleguide"}, {Label: "Balcony Windowsill", Path: "/styleguide"}}, v.Base).Render(ctx, templ_7745c5c3_Buffer)
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -732,7 +735,7 @@ func styleguidePage(v sgView) templ.Component {
 				}
 				return nil
 			})
-			templ_7745c5c3_Err = ui.PageHeader("Balcony Windowsill", "Sonoff Basic · Tasmota 14.2.0").Render(templ.WithChildren(ctx, templ_7745c5c3_Var19), templ_7745c5c3_Buffer)
+			templ_7745c5c3_Err = ui.PageHeaderSample("Balcony Windowsill", "Sonoff Basic · Tasmota 14.2.0").Render(templ.WithChildren(ctx, templ_7745c5c3_Var19), templ_7745c5c3_Buffer)
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -902,7 +905,7 @@ func styleguidePage(v sgView) templ.Component {
 				}()
 			}
 			ctx = templ.InitializeContext(ctx)
-			templ_7745c5c3_Err = ui.ErrorPage("404", "This page doesn't exist", "The address may be mistyped, or the device or transaction it pointed to was deleted.", "/devices/d99", ui.Btn{Label: "Go to the dashboard", Kind: "primary", Href: v.Base + "/styleguide"}, ui.Btn{Label: "All devices", Href: v.Base + "/styleguide"}).Render(ctx, templ_7745c5c3_Buffer)
+			templ_7745c5c3_Err = ui.ErrorPageSample("404", "This page doesn't exist", "The address may be mistyped, or the device or transaction it pointed to was deleted.", "/devices/d99", ui.Btn{Label: "Go to the dashboard", Kind: "primary", Href: v.Base + "/styleguide"}, ui.Btn{Label: "All devices", Href: v.Base + "/styleguide"}).Render(ctx, templ_7745c5c3_Buffer)
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -936,7 +939,7 @@ func styleguidePage(v sgView) templ.Component {
 					}()
 				}
 				ctx = templ.InitializeContext(ctx)
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 35, "<h1>Sign in</h1>")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 35, "<div class=\"h1-sample\">Sign in</div>")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
@@ -1093,7 +1096,7 @@ func sgSec(id string) templ.Component {
 		var templ_7745c5c3_Var31 string
 		templ_7745c5c3_Var31, templ_7745c5c3_Err = templ.ResolveAttributeValue("sg-" + id)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/styleguide.templ`, Line: 279, Col: 46}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/styleguide.templ`, Line: 282, Col: 46}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var31)
 		if templ_7745c5c3_Err != nil {
@@ -1106,7 +1109,7 @@ func sgSec(id string) templ.Component {
 		var templ_7745c5c3_Var32 string
 		templ_7745c5c3_Var32, templ_7745c5c3_Err = templ.ResolveAttributeValue("sg-" + id + "-h")
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/styleguide.templ`, Line: 279, Col: 84}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/styleguide.templ`, Line: 282, Col: 84}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var32)
 		if templ_7745c5c3_Err != nil {
@@ -1119,7 +1122,7 @@ func sgSec(id string) templ.Component {
 		var templ_7745c5c3_Var33 string
 		templ_7745c5c3_Var33, templ_7745c5c3_Err = templ.ResolveAttributeValue("sg-" + id + "-h")
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/styleguide.templ`, Line: 280, Col: 28}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/styleguide.templ`, Line: 283, Col: 28}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var33)
 		if templ_7745c5c3_Err != nil {
@@ -1132,7 +1135,7 @@ func sgSec(id string) templ.Component {
 		var templ_7745c5c3_Var34 string
 		templ_7745c5c3_Var34, templ_7745c5c3_Err = templ.JoinStringErrs(sgTitle(id))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/styleguide.templ`, Line: 280, Col: 44}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/styleguide.templ`, Line: 283, Col: 44}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var34))
 		if templ_7745c5c3_Err != nil {

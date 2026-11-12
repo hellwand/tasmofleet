@@ -40,44 +40,47 @@ const hostile = `<script>alert(1)</script>" onmouseover="x`
 func TestComponentsEscapeEveryText(t *testing.T) {
 	h := hostile
 	all := map[string]templ.Component{
-		"PageHeader":  PageHeader(h, h),
-		"Button":      Button(Btn{Label: h, Aria: h}),
-		"ButtonLink":  Button(Btn{Label: h, Href: "/x", Dialog: h}),
-		"Badge":       Badge(Tone(h), h),
-		"StatusDot":   StatusDot(ToneOK, h),
-		"Avatar":      Avatar(h, h),
-		"Card":        Card(h, h),
-		"ListCard":    ListCard(h, h, "/x"),
-		"KV":          KV([]KVRow{{Key: h, Value: h, Mono: true}}),
-		"Tabs":        Tabs(h, []Tab{{Label: h, Href: "/x"}, {Label: h, Reason: h}}),
-		"RowMenu":     RowMenu(h, []MenuItem{{Label: h, Href: "/x"}, {Label: h, Disabled: true, Why: h}}, false),
-		"Banner":      Banner(BannerData{Tone: ToneWarn, Title: h, Text: h, Action: &Btn{Label: h}}),
-		"ErrorSum":    ErrorSummary(h),
-		"Toast":       ToastStatic(ToastData{Tone: ToneDanger, Text: h, Action: h}),
-		"Field":       Field(FieldData{Label: h, Name: "n", Value: h, Placeholder: h, Error: h}),
-		"Select":      SelectField(h, "n", []Option{{Value: h, Label: h}}),
-		"Check":       Check("n", h, h, false, false),
-		"RadioCards":  RadioCards(h, "n", []Option{{Value: h, Label: h, Text: h}}),
-		"Segmented":   Segmented(h, "n", []Option{{Value: h, Label: h}}),
-		"Toggle":      Toggle("n", h, h, true, false),
-		"Power":       PowerSwitch(h, true, false),
-		"StatTile":    StatTile(StatTileData{Label: h, Value: h, Hint: h, Href: "/x"}),
-		"Attention":   AttentionList([]AttProposal{{Name: h, Text: h, Primary: h, Secondary: h, PrimaryAction: "/a", SecondaryAction: "/b"}}, []AttItem{{Name: h, Text: h, Href: "/x"}}, h),
-		"TxnCard":     TxnCard(TxnData{ID: h, Title: h, State: h, Summary: h, Href: "/x", OK: 1, Total: 1}),
-		"TxnRow":      TxnRow(TxnRowData{ID: h, Title: h, Result: h, When: h, Href: "/x"}),
-		"Dialog":      Dialog(DialogData{ID: "d", Title: h, Body: h, Command: h, Changes: []KVRow{{Key: h, Value: h}}, Action: "/x", CSRF: h, Verb: h}),
-		"StepUp":      StepUp(StepUpData{ID: "s", Name: h, Sub: h, What: h, IdP: h, IdPHref: "/x", Local: true, Action: "/x", CSRF: h, Error: h}),
-		"ConfirmPage": ConfirmPage(ConfirmData{Title: h, Heading: h, Text: h, Warning: h, Facts: []KVRow{{Key: h, Value: h}}, Action: "/x", CSRF: h, Fields: []KVRow{{Key: h, Value: h}}, Verb: h, CancelHref: "/x", CancelLabel: h}),
-		"Empty":       Empty(h, h),
-		"NoMatch":     NoMatch(h, "/x"),
-		"Skeleton":    Skeleton(h, 2),
-		"ErrorPage":   ErrorPage(h, h, h, h, Btn{Label: h, Href: "/x"}, Btn{Label: h}),
-		"AuthCard":    AuthCard("", h, h),
-		"Console":     Console(ConsoleData{Title: h, Action: "/x", CSRF: h, Lines: []ConsoleLine{{Time: h, Text: h, Kind: "err"}}, Quick: []string{h}}),
-		"Diff":        Diff(DiffData{OldLabel: h, NewLabel: h, Rows: []DiffRow{{Key: h, Old: h, New: h, Changed: true}}}),
-		"DiffUnified": Diff(DiffData{OldLabel: h, NewLabel: h, Unified: true, Rows: []DiffRow{{Key: h, Old: h, New: h, Changed: true}}}),
-		"Notes":       Notes([]NoteBlock{{Kind: "h", Text: h}, {Kind: "p", Text: h}, {Kind: "ul", Items: []string{h}}, {Kind: "code", Text: h}, {Kind: "breaking", Text: h, Items: []string{h}}}),
-		"LivePill":    LivePill("ok", h),
+		"PageHeader":       PageHeader(h, h),
+		"PageHeaderSample": PageHeaderSample(h, h),
+		"CrumbsSample":     CrumbsSample([]Crumb{{Label: h, Path: "/x"}, {Label: h}}, h),
+		"ErrorPageSample":  ErrorPageSample(h, h, h, h, Btn{Label: h, Href: "/x"}, Btn{Label: h}),
+		"Button":           Button(Btn{Label: h, Aria: h}),
+		"ButtonLink":       Button(Btn{Label: h, Href: "/x", Dialog: h}),
+		"Badge":            Badge(Tone(h), h),
+		"StatusDot":        StatusDot(ToneOK, h),
+		"Avatar":           Avatar(h, h),
+		"Card":             Card(h, h),
+		"ListCard":         ListCard(h, h, "/x"),
+		"KV":               KV([]KVRow{{Key: h, Value: h, Mono: true}}),
+		"Tabs":             Tabs(h, []Tab{{Label: h, Href: "/x"}, {Label: h, Reason: h}}),
+		"RowMenu":          RowMenu(h, []MenuItem{{Label: h, Href: "/x"}, {Label: h, Disabled: true, Why: h}}, false),
+		"Banner":           Banner(BannerData{Tone: ToneWarn, Title: h, Text: h, Action: &Btn{Label: h}}),
+		"ErrorSum":         ErrorSummary(h),
+		"Toast":            ToastStatic(ToastData{Tone: ToneDanger, Text: h, Action: h}),
+		"Field":            Field(FieldData{Label: h, Name: "n", Value: h, Placeholder: h, Error: h}),
+		"Select":           SelectField(h, "n", []Option{{Value: h, Label: h}}),
+		"Check":            Check("n", h, h, false, false),
+		"RadioCards":       RadioCards(h, "n", []Option{{Value: h, Label: h, Text: h}}),
+		"Segmented":        Segmented(h, "n", []Option{{Value: h, Label: h}}),
+		"Toggle":           Toggle("n", h, h, true, false),
+		"Power":            PowerSwitch(h, true, false),
+		"StatTile":         StatTile(StatTileData{Label: h, Value: h, Hint: h, Href: "/x"}),
+		"Attention":        AttentionList([]AttProposal{{Name: h, Text: h, Primary: h, Secondary: h, PrimaryAction: "/a", SecondaryAction: "/b"}}, []AttItem{{Name: h, Text: h, Href: "/x"}}, h),
+		"TxnCard":          TxnCard(TxnData{ID: h, Title: h, State: h, Summary: h, Href: "/x", OK: 1, Total: 1}),
+		"TxnRow":           TxnRow(TxnRowData{ID: h, Title: h, Result: h, When: h, Href: "/x"}),
+		"Dialog":           Dialog(DialogData{ID: "d", Title: h, Body: h, Command: h, Changes: []KVRow{{Key: h, Value: h}}, Action: "/x", CSRF: h, Verb: h}),
+		"StepUp":           StepUp(StepUpData{ID: "s", Name: h, Sub: h, What: h, IdP: h, IdPHref: "/x", Local: true, Action: "/x", CSRF: h, Error: h}),
+		"ConfirmPage":      ConfirmPage(ConfirmData{Title: h, Heading: h, Text: h, Warning: h, Facts: []KVRow{{Key: h, Value: h}}, Action: "/x", CSRF: h, Fields: []KVRow{{Key: h, Value: h}}, Verb: h, CancelHref: "/x", CancelLabel: h}),
+		"Empty":            Empty(h, h),
+		"NoMatch":          NoMatch(h, "/x"),
+		"Skeleton":         Skeleton(h, 2),
+		"ErrorPage":        ErrorPage(h, h, h, h, Btn{Label: h, Href: "/x"}, Btn{Label: h}),
+		"AuthCard":         AuthCard("", h, h),
+		"Console":          Console(ConsoleData{Title: h, Action: "/x", CSRF: h, Lines: []ConsoleLine{{Time: h, Text: h, Kind: "err"}}, Quick: []string{h}}),
+		"Diff":             Diff(DiffData{OldLabel: h, NewLabel: h, Rows: []DiffRow{{Key: h, Old: h, New: h, Changed: true}}}),
+		"DiffUnified":      Diff(DiffData{OldLabel: h, NewLabel: h, Unified: true, Rows: []DiffRow{{Key: h, Old: h, New: h, Changed: true}}}),
+		"Notes":            Notes([]NoteBlock{{Kind: "h", Text: h}, {Kind: "p", Text: h}, {Kind: "ul", Items: []string{h}}, {Kind: "code", Text: h}, {Kind: "breaking", Text: h, Items: []string{h}}}),
+		"LivePill":         LivePill("ok", h),
 	}
 	for name, c := range all {
 		out := comp(t, c)
@@ -93,6 +96,42 @@ func TestComponentsEscapeEveryText(t *testing.T) {
 		if !strings.Contains(out, "&lt;") { // the avatar shows only the initials, still escaped
 			t.Errorf("%s: the hostile text is not shown as text: %.200s", name, out)
 		}
+	}
+}
+
+// Why (#515): a sample of the page header, the crumbs or the error page on /styleguide sits inside
+// a page that already has an h1, the shell's #crumbs and its Breadcrumb landmark. The samples must
+// look the same (same classes) but carry none of that page-level identity, or the style guide
+// fails the checks it documents. The real components keep it: the shell and CrumbsOOB need the id.
+func TestSampleVariantsCarryNoPageIdentity(t *testing.T) {
+	trail := []Crumb{{Label: "Devices", Path: "/x"}, {Label: "Lamp"}}
+	real := map[string]string{
+		"PageHeader": comp(t, PageHeader("T", "S")),
+		"ErrorPage":  comp(t, ErrorPage("404", "T", "B", "/p", Btn{Label: "A"}, Btn{Label: "B"})),
+		"Crumbs":     comp(t, Crumbs(trail, "")),
+	}
+	for name, want := range map[string]string{"PageHeader": "<h1>T</h1>", "ErrorPage": "<h1>T</h1>", "Crumbs": `id="crumbs"`} {
+		if !strings.Contains(real[name], want) {
+			t.Errorf("%s lost %q: the real component keeps its page-level identity", name, want)
+		}
+	}
+	samples := map[string]string{
+		"PageHeaderSample": comp(t, PageHeaderSample("T", "S")),
+		"ErrorPageSample":  comp(t, ErrorPageSample("404", "T", "B", "/p", Btn{Label: "A"}, Btn{Label: "B"})),
+		"CrumbsSample":     comp(t, CrumbsSample(trail, "")),
+	}
+	for name, out := range samples {
+		for _, bad := range []string{"<h1", ` id="crumbs"`, "Breadcrumb"} {
+			if strings.Contains(out, bad) {
+				t.Errorf("%s contains %q", name, bad)
+			}
+		}
+	}
+	if !strings.Contains(samples["PageHeaderSample"], `class="pghead"`) || !strings.Contains(samples["ErrorPageSample"], `class="errpage"`) {
+		t.Error("a sample lost the wrapper class that styles it")
+	}
+	if !strings.Contains(samples["CrumbsSample"], `class="crumbs"`) || !strings.Contains(samples["CrumbsSample"], ">Lamp<") {
+		t.Errorf("the crumbs sample no longer draws the trail: %s", samples["CrumbsSample"])
 	}
 }
 

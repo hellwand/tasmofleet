@@ -20,16 +20,41 @@ func TestStaleHintNamesConfiguredThreshold(t *testing.T) {
 	}
 }
 
-// Why: every status word the UI can draw as a badge explains itself; a new
-// state without an explanation is a gap the user would hit.
-func TestEveryToneHasAHint(t *testing.T) {
-	for k := range tones {
-		if k == "stale" {
-			continue
+// Why (#516): dead copy is not reviewed, and it is where wording the design system retired
+// ("Warn", "Enforce") survives. hints may hold exactly the words a call site can pass to h.hint:
+// the health state (cells.templ), the job state (updates.go) and "no-ota" (cells.templ). "stale"
+// is the exception: hintText builds it from the configured threshold. A new state without an
+// entry, or an entry nobody can look up, fails here.
+func TestHintsAreExactlyTheWordsACallSiteCanPass(t *testing.T) {
+	want := map[string]bool{"no-ota": true}
+	for _, s := range []model.HealthState{model.HealthUnknown, model.HealthOnline, model.HealthStale, model.HealthOffline, model.HealthAuthFailed} {
+		if s != model.HealthStale {
+			want[string(s)] = true
 		}
+	}
+	for _, s := range []model.JobState{
+		model.JobQueued, model.JobPreflight, model.JobBackup, model.JobSetOtaURL, model.JobUpgradeIssued, model.JobAwaitReboot,
+		model.JobSafebootSwitch, model.JobSafebootRecover, model.JobVerify, model.JobRestoreOtaURL, model.JobApplying,
+		model.JobSucceeded, model.JobFailed, model.JobCancelled,
+	} {
+		want[string(s)] = true
+	}
+	for k := range hints {
+		if !want[k] {
+			t.Errorf("hints[%q] cannot be reached: no call site passes it", k)
+		}
+	}
+	for k := range want {
 		if hints[k] == "" {
-			t.Errorf("status %q has a tone but no hint", k)
+			t.Errorf("%q can be passed to h.hint but has no hint", k)
 		}
+	}
+	// "stale" is not in the table; hintText must still answer for it.
+	if hints["stale"] != "" {
+		t.Error(`hints["stale"] would be shadowed: hintText builds the Stale text from the configured threshold`)
+	}
+	if hintText("stale", nil) == "" {
+		t.Error(`hintText("stale") is empty`)
 	}
 }
 
