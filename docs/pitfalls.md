@@ -84,6 +84,22 @@ means nothing stops you: you have to know it. The full working rules are in
   No cleanup timer.
 - **Enforced:** `tools/mutation-gate.sh`; `scripts/mutation-gocache.test.mjs`.
 
+### A weekly mutation shard timed out and nobody was told (#729)
+
+- **Happened:** on 2026-11-09 shard 4/4 of the weekly mutation run hit the 30 minute
+  job limit. A job cut off by its timeout ends "cancelled", not "failed", so the
+  `failure()` condition of `weekly-failure-issue` was false and no issue was opened.
+  The shard was too long because the files added since the last refresh of
+  `tools/mutation-weights.txt` (about 200 mutants) had no entry, counted as one mutant
+  each and were all dealt to the shard that already held the slowest package.
+- **Rule:** a job that reports a scheduled run's failure runs when the job it watches
+  did not succeed (`!cancelled() && needs.<job>.result != 'success'`), not only on
+  `failure()`. A file without a weights entry is dealt by its size. After a new file
+  or a slow week, refresh the counts (`tools/mutation-weights.sh`) and compare each
+  shard's duration with `make mutation-plan`.
+- **Enforced:** the condition in `.github/workflows/weekly.yml`;
+  `scripts/mutation-shard.test.mjs` for the estimate.
+
 ### Script tests left temp directories in `/tmp` (#552)
 
 - **Happened:** 266 directories after one afternoon of runs. On a tmpfs `/tmp`

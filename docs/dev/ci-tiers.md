@@ -51,7 +51,7 @@ SAFETY package, catalogue, image paths). Every gate runs through the Makefile.
   failure is fixed through an issue, not by holding a release.
 - **WEEKLY** (`weekly.yml`: cron on `main`, Sunday night, manual dispatch): the full mutation run of every MUTATION package with its gate (`make mutation`
   in four shards, `_mutation.yml` with scope all). The nightly does not run it (#480), and no PR waits for it (#555), so this is where a surviving mutant shows up, once a week. It blocks nothing; when it fails on the schedule, the job `weekly-failure-issue` opens an
-  issue "Weekly mutation run failed on main (date)" (label `ci`) or comments on the open one. The run also saves the mutation Go cache.
+  issue "Weekly mutation run failed on main (date)" (label `ci`) or comments on the open one. A shard that hits its job timeout ends "cancelled", not "failed": the issue job also runs then (`!cancelled() && needs.mutation.result != 'success'`) and lists that shard with the minutes it ran; a run that a person or a newer run cancelled as a whole reports nothing. The run also saves the mutation Go cache.
 - **Which e2e tests are `@core`**: smoke, sign-in and authorization (header, local, OIDC, standalone,
   operators refused), first-run setup, base path, the device list, the OTA update flow (batch, push upload),
   the chip-family and OTA-exclusion refusals in the UI, device writes (console, settings, restore, make

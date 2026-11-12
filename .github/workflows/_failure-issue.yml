@@ -3,7 +3,8 @@
 # One open issue per title collects the failing runs: a later failure comments on it instead of opening
 # a second. The body names the failed jobs, the tests their logs report as failed and the commits on
 # main since the last green scheduled run of the calling workflow, so the person reading it can start
-# at the suspects instead of the log.
+# at the suspects instead of the log. A job that hit its timeout ends "cancelled", not "failed": it is
+# listed too, with the minutes it ran (the calling job decides whether a run is reported at all).
 name: failure-issue
 
 on:
@@ -50,8 +51,14 @@ jobs:
             printf 'Run: %s\n\nFailed jobs:\n\n' "$RUN_URL"
             # Per failed job: the failed tests from its log, Playwright's numbered detail blocks
             # ("1) [chromium] > file > title") and Go's "--- FAIL: Test". Without them the job name stands alone.
-            gh run view "$RUN_ID" --json jobs -q '.jobs[] | select(.conclusion == "failure") | [.databaseId, .name] | @tsv' |
-              while IFS=$'\t' read -r id name; do
+            # A job that is "cancelled" while its run was not is a job timeout: the caller reports only runs
+            # that nobody cancelled. It has no failed tests to read from its log, only the minutes it ran.
+            gh run view "$RUN_ID" --json jobs -q '.jobs[] | select(.conclusion == "failure" or .conclusion == "cancelled") | [.databaseId, .name, .conclusion, ((.completedAt | fromdateiso8601) - (.startedAt | fromdateiso8601) | . / 60 | floor)] | @tsv' |
+              while IFS=$'\t' read -r id name conclusion minutes; do
+                if [ "$conclusion" = cancelled ]; then
+                  printf -- '- %s: cancelled after %s min, it hit its job timeout\n' "$name" "$minutes"
+                  continue
+                fi
                 printf -- '- %s\n' "$name"
                 tests=$(curl -fsSL --max-time 60 -H "Authorization: Bearer $GH_TOKEN" \
                   "https://api.github.com/repos/$GH_REPO/actions/jobs/$id/logs" 2>/dev/null |

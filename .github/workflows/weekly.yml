@@ -2,8 +2,9 @@
 # (_mutation.yml, scope all) and its gate. The nightly does not run it any more (#480) and no PR waits
 # for mutation testing (#555: diff coverage and a revert check replaced it in the PR path), so this is
 # the one place it runs, as a report until the keep-or-drop decision (end of November 2026).
-# It blocks no release and no merge; a failing week opens an issue (job weekly-failure-issue,
-# schedule only). The run also saves the mutation Go cache (from main only, see .github/actions/go).
+# It blocks no release and no merge; a failing week, or a shard that hits its job timeout, opens an
+# issue (job weekly-failure-issue, schedule only). The run also saves the mutation Go cache (from main
+# only, see .github/actions/go).
 name: weekly
 
 on:
@@ -36,7 +37,11 @@ jobs:
     name: weekly failure issue
     needs: mutation
     # Only the scheduled run on main reports; a manual run, from any branch, never touches the issue.
-    if: ${{ failure() && github.event_name == 'schedule' && github.ref == 'refs/heads/main' }}
+    # A shard that hits its job timeout ends "cancelled", which failure() does not match, so the report
+    # used to be skipped and nobody heard of the week (#729). Report whenever the mutation job did not
+    # succeed: a failed shard or gate, a timeout, a shard that never ran. !cancelled() keeps out the run
+    # that a person or a newer run cancelled as a whole: that is not a failing week.
+    if: ${{ !cancelled() && needs.mutation.result != 'success' && github.event_name == 'schedule' && github.ref == 'refs/heads/main' }}
     permissions:
       contents: read
       issues: write

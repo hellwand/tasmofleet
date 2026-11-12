@@ -56,5 +56,6 @@ on the changed lines (`MUTATION_DIFF_MIN`) are too few for a percentage: such a 
 kill, and one without any decided mutant (a comment, a declaration) passes and says so. Details and the
 gremlins `--diff` traps they work around: header of `tools/mutation-gate.sh`. A sharded run leaves `mutation-report.json` and a job
 summary (lived, timed-out and not-covered mutants per package) next to the counts (`tools/mutation-report.sh`).
+The CI shards are dealt by estimated cost (`tools/mutation-weights.txt`: runnable mutants per file and seconds per mutant per package; `make mutation-plan` shows the estimate per shard). A file without an entry is estimated by its size, so a new file does not skew the plan, but its count is a guess: after adding files to a MUTATION package, or when a weekly shard comes close to the 30 minute job limit, run `tools/mutation-weights.sh` and set the `cost` lines from the shard durations of the last weekly run (measured over estimated seconds per package).
 gremlins builds every mutant, and each build is garbage afterwards (+261 MB per `internal/cmdpolicy` run), so the gate runs it with a throwaway `GOCACHE`
 next to your Go cache that it removes when it ends (#546): neither your Go cache nor the one CI saves ever holds a mutant build (`MUTATION_GOCACHE_SEED` warms it, header of `tools/mutation-gate.sh`).
