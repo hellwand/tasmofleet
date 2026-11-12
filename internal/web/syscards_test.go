@@ -243,7 +243,7 @@ func TestSystemSettingsLockedFieldIsReadOnlyWithABadge(t *testing.T) {
 	if strings.Contains(in, "<input") || strings.Contains(in, "<textarea") {
 		t.Errorf("a locked field has a control: %.300s", in)
 	}
-	for _, want := range []string{"Environment", "METRICS_TOKEN", "container configuration"} {
+	for _, want := range []string{"Environment", "TASMOFLEET_METRICS_TOKEN in the container configuration"} {
 		if !strings.Contains(in, want) {
 			t.Errorf("locked field lacks %q: %.400s", want, in)
 		}
@@ -618,7 +618,7 @@ func TestSystemSettingsSignInTabFollowsTheMockup(t *testing.T) {
 	if strings.Contains(mode, `class="lrow"`) {
 		t.Error("the radio cards have no label row (it only held a lone reset line)")
 	}
-	if !strings.Contains(mode, "Needs PUBLIC_URL. The local admin always works as a fallback.") || strings.Index(mode, "Needs PUBLIC_URL") < strings.Index(mode, "rcards") {
+	if !strings.Contains(mode, "Needs TASMOFLEET_PUBLIC_URL in the container configuration. The local admin always works as a fallback.") || strings.Index(mode, "Needs TASMOFLEET_PUBLIC_URL") < strings.Index(mode, "rcards") {
 		t.Error("the PUBLIC_URL note sits below the choices")
 	}
 }

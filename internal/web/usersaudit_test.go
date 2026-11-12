@@ -187,7 +187,7 @@ func TestSystemSettingsTabsAreConsistent(t *testing.T) {
 		t.Error("the Network tab has no visible label for its field")
 	}
 	_, body = e.do(t, "GET", "/settings/system?tab=signin", "admin", nil)
-	if !strings.Contains(body, `<label class="lbl" for="f-OIDC_CLIENT_ID">Client ID</label>`) || !strings.Contains(body, `<div class="in ro mono">envid</div>`) || !strings.Contains(body, "OIDC_CLIENT_ID in the container configuration") {
+	if !strings.Contains(body, `<label class="lbl" for="f-OIDC_CLIENT_ID">Client ID</label>`) || !strings.Contains(body, `<div class="in ro mono">envid</div>`) || !strings.Contains(body, "TASMOFLEET_OIDC_CLIENT_ID in the container configuration") {
 		t.Error("a read-only setting does not use the label pattern of the editable ones, or hides why")
 	}
 	_, body = e.do(t, "GET", "/settings/system?tab=advanced", "admin", nil)

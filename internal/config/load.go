@@ -113,6 +113,11 @@ func Load(environ []string) (Config, error) {
 	if c.Locked["OIDC_ISSUER"] || c.Locked["OIDC_CLIENT_SECRET"] {
 		c.Locked["OIDC_ISSUER"], c.Locked["OIDC_CLIENT_SECRET"] = true, true
 	}
+	// Nobody is locked out by a half-set pair (local accounts always sign in), but the stored issuer is
+	// then skipped and stored single sign-on is off: say so once, with the variable that is missing (#720).
+	if note := c.LockNote("OIDC_ISSUER"); note != "" {
+		c.Warnings = append(c.Warnings, note)
+	}
 	// The transport follows from the mode, never from the port or a variable (#152).
 	// Without a certificate, a proxy or an explicit opt-in to plain HTTP the server
 	// serves a self-signed certificate, so a fresh container is reachable at once

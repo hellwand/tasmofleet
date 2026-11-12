@@ -1,6 +1,7 @@
 package config
 
 import (
+	"cmp"
 	"errors"
 	"fmt"
 	"net/netip"
@@ -156,7 +157,7 @@ func Overlay(base Config, vals map[string]string) (Config, map[string]error) {
 			continue
 		}
 		if base.Locked[k] {
-			skipped[k] = errors.New("set by the environment")
+			skipped[k] = errors.New(cmp.Or(base.LockReason(k), "set by the environment"))
 			continue
 		}
 		pending = append(pending, k)
@@ -218,6 +219,40 @@ func IsUI(key string) bool { return isUI(key) }
 
 // IsLocked reports whether the operator set key in the environment.
 func (c Config) IsLocked(key string) bool { return c.Locked[key] }
+
+// LockNote explains a lock the operator did not set directly. The issuer and the client secret lock
+// together (see Load): a key that is locked and still empty can only be locked by its partner, because an
+// empty variable or an empty secret file counts as not set. It returns "" for every other key and for a
+// key the environment set itself. The text names the prefixed variables, which are the only form the
+// container environment reads, and never a value.
+func (c Config) LockNote(key string) string {
+	if !c.Locked[key] {
+		return ""
+	}
+	switch {
+	case key == "OIDC_ISSUER" && c.OIDCIssuer == "":
+		return Prefix + "OIDC_ISSUER is not set, and the client secret from the container configuration (" + Prefix + "OIDC_CLIENT_SECRET) locked it: " +
+			"set " + Prefix + "OIDC_ISSUER there as well. Until then the stored issuer is ignored, single sign-on is off and local sign-in works."
+	case key == "OIDC_CLIENT_SECRET" && c.OIDCClientSecret == "":
+		return Prefix + "OIDC_CLIENT_SECRET is not set, and the issuer from the container configuration (" + Prefix + "OIDC_ISSUER) locked it: " +
+			"set " + Prefix + "OIDC_CLIENT_SECRET (or " + Prefix + "OIDC_CLIENT_SECRET_FILE) there as well. Until then a client secret stored on the Settings page is ignored."
+	}
+	return ""
+}
+
+// LockReason is the short form of LockNote: the reason a stored value of key is skipped, for the log and
+// the list of ignored values. The start already carries the full LockNote once as a warning (Load) and the
+// locked field shows it, so the skip reason must not repeat that paragraph word for word (#720). It
+// returns "" in the same cases as LockNote.
+func (c Config) LockReason(key string) string {
+	if c.LockNote(key) == "" {
+		return ""
+	}
+	if key == "OIDC_ISSUER" {
+		return "locked by the client secret (" + Prefix + "OIDC_CLIENT_SECRET) from the container configuration; " + Prefix + "OIDC_ISSUER is not set"
+	}
+	return "locked by the issuer (" + Prefix + "OIDC_ISSUER) from the container configuration; " + Prefix + "OIDC_CLIENT_SECRET is not set"
+}
 
 // shortDuration is time.Duration.String without the zero parts: "6h", not
 // "6h0m0s". The result parses back to the same duration.
