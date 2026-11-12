@@ -538,16 +538,25 @@ func (m *Manager) writeAtomic(dir, name string, data []byte) (err error) {
 	if err = os.Rename(tmp, final); err != nil {
 		return err
 	}
-	if err = m.flushDir(dir); err != nil {
-		if !dirSyncUnsupported(err) {
-			_ = os.Remove(final) // not indexed, so nothing would ever prune it
-			return err
-		}
-		// Nothing to wait for on this file system: index the file as before.
-		if _, seen := m.noDirSync.LoadOrStore(dir, true); !seen {
-			m.o.Log.Warn("backup: directory sync not supported by this file system, backups are indexed without it",
-				"component", "backup", "dir", dir, "err", err)
-		}
+	if err = m.syncDirectory(dir); err != nil {
+		_ = os.Remove(final) // not indexed, so nothing would ever prune it
+		return err
+	}
+	return nil
+}
+
+// syncDirectory makes dir's entries durable through flushDir. A file system
+// that cannot sync a directory (dirSyncUnsupported) is not an error: there is
+// nothing to wait for, so the caller indexes as before; the limitation is
+// logged once per directory. Any other error is returned.
+func (m *Manager) syncDirectory(dir string) error {
+	err := m.flushDir(dir)
+	if err == nil || !dirSyncUnsupported(err) {
+		return err
+	}
+	if _, seen := m.noDirSync.LoadOrStore(dir, true); !seen {
+		m.o.Log.Warn("backup: directory sync not supported by this file system, backups are indexed without it",
+			"component", "backup", "dir", dir, "err", err)
 	}
 	return nil
 }

@@ -467,11 +467,12 @@ func (m *Manager) migrateOne(ctx context.Context, b model.Backup, newRel, oldFul
 	// Make the rename durable before the row changes: after a power loss on a
 	// journaling/CoW file system the row must never point to a path whose
 	// directory entry was not persisted. On failure the row keeps the old path;
-	// whichever name survived is found by the next start.
-	if err := syncDir(filepath.Dir(newFull)); err != nil {
+	// whichever name survived is found by the next start. A file system without
+	// directory fsync is no failure (syncDirectory), as for the backups themselves.
+	if err := m.syncDirectory(filepath.Dir(newFull)); err != nil {
 		return left("sync target directory", err)
 	}
-	if err := syncDir(filepath.Dir(oldFull)); err != nil {
+	if err := m.syncDirectory(filepath.Dir(oldFull)); err != nil {
 		return left("sync source directory", err)
 	}
 	if !m.setPath(ctx, b, newRel) {
