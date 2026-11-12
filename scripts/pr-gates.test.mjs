@@ -284,6 +284,24 @@ test("optOut: label, or a marker with a reason; the template's comment and a bar
   assert.equal(optOut({ body: "", labels: [] }), null);
 });
 
+// #730: one pass over "<!<!-- x -->--" leaves a fresh "<!--" behind, which then opens a comment around the
+// marker line; a single pass would count a marker that the template hides. Multi-line on purpose: on one line
+// the leftover "<!--" never closes and the marker is not found today either.
+test("optOut: a nested template comment hides its marker line completely (#730)", () => {
+  assert.equal(
+    optOut({
+      body: "<!<!-- x -->--\nrevert-check: skip - template example\n-->",
+    }),
+    null,
+  );
+  assert.equal(
+    optOut({
+      body: "<!<!<!-- a -->-- b -->--\nrevert-check: skip - hidden\n-->\nrevert-check: skip - real reason",
+    }).reason,
+    "real reason",
+  );
+});
+
 // ---- the gates, on a toy module ------------------------------------------------------------------------
 
 const roots = [];
