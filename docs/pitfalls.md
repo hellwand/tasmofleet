@@ -244,6 +244,16 @@ means nothing stops you: you have to know it. The full working rules are in
   needed, use Claude in Chrome in your own tab and close it afterwards.
 - **Enforced:** not enforced, convention.
 
+### A document-wide script on every live cell swap (#726)
+
+- **Happened:** the Devices list swaps one cell per fragment, about 90 times a second with 60 devices,
+  changed or not. A `syncAll` that walks the whole document was added to `htmx:afterSwap` (#594), and the
+  open page fell 10 s and more behind its server; the nightly e2e job failed on it (#703).
+- **Rule:** a listener on `htmx:afterSwap` or `htmx:afterSettle` runs for every live cell: check the swap's
+  target first and keep per-swap work off the whole document (`syncAll` at `htmx:afterSettle` still walks it
+  once per swap: the next thing to scope). Live cells whose fragment did not change are not swapped (`live.js`).
+- **Enforced:** `e2e/tests/live-cell-swaps.spec.ts` counts swaps and document-wide syncs per live cell.
+
 ## Releases
 
 ### The migration guard covered two files (#595)

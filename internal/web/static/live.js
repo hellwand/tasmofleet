@@ -121,6 +121,42 @@
     }
   });
 
+  // Live cells of the Devices list (#726). Every health event brings six fragments per device (the
+  // phone cards repeat four of them), whether the cell changed or not: with 60 devices that is about 90
+  // swaps a second, and each runs the page's swap scripts. A cell whose fragment is the one it was last
+  // swapped to is left alone. The memo is dropped when anything else swaps that element (a form post, a
+  // reload of the list makes new elements without one), so it never hides a cell that was changed by hand.
+  var cellMemo = new WeakMap(),
+    cellSent = new WeakMap();
+  document.addEventListener("htmx:sseBeforeMessage", function (e) {
+    var t = e.target;
+    var data = e.detail && e.detail.data;
+    if (
+      !(t instanceof Element) ||
+      typeof data !== "string" ||
+      !t.closest("table[data-table], li.dcard")
+    ) {
+      return;
+    }
+    if (cellMemo.get(t) === data) {
+      e.preventDefault();
+      return;
+    }
+    cellSent.set(t, data);
+  });
+  document.addEventListener("htmx:afterSwap", function (e) {
+    var t = e.target;
+    if (!(t instanceof Element)) {
+      return;
+    }
+    if (cellSent.has(t)) {
+      cellMemo.set(t, cellSent.get(t));
+      cellSent.delete(t);
+    } else {
+      cellMemo.delete(t);
+    }
+  });
+
   // Device overview (#145, #126): the page refreshes #devlive, the header and the Activity list
   // when the device changes, but never the Identity and Connection cards (they hold answers and
   // notices). Those follow the offline state from here: dimmed, and Refresh identity disabled.

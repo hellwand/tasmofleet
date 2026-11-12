@@ -435,7 +435,15 @@
   // The server's HTML has the select-all controls hidden and the bulk bar's count empty; syncAll shows
   // and fills them. Run it as soon as the content is in, after the restore of the ticked rows above (the
   // count follows the ticks), not only at afterSettle: the controls blinked on every list refresh (#594).
-  document.addEventListener("htmx:afterSwap", syncAll);
+  // Only for the swaps that bring those controls (the list and the scan results): syncAll walks the whole
+  // document, and the live cells of a 60-device list swap about 90 times a second (#726); those are still
+  // covered by the afterSettle run above.
+  document.addEventListener("htmx:afterSwap", function (e) {
+    var t = e.target;
+    if (t instanceof Element && (t.id === "devtable" || t.id === "scan" || t.id === "scan-live")) {
+      syncAll();
+    }
+  });
   // toggle and close do not bubble: listen in the capture phase; wait a tick for the state to settle
   ["toggle", "close"].forEach(function (n) {
     document.addEventListener(
