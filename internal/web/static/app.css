@@ -5551,7 +5551,8 @@ html[data-live="offline"] .conn-banner.conn-off {
 .pghead-t {
   min-width: 0;
 }
-.pghead h1 {
+.pghead h1,
+.pghead .h1-sample {
   margin: 0;
   font: 600 22px/1.2 var(--font-sans);
   letter-spacing: -0.015em;
@@ -6646,7 +6647,8 @@ dialog.stepup {
   font: 500 13px var(--font-mono);
   color: var(--color-text-3);
 }
-.errpage h1 {
+.errpage h1,
+.errpage .h1-sample {
   margin: 0;
   font: 600 26px/1.2 var(--font-sans);
   letter-spacing: -0.02em;
@@ -6688,7 +6690,8 @@ dialog.stepup {
   flex-direction: column;
   gap: var(--sp-14);
 }
-.auth-card h1 {
+.auth-card h1,
+.auth-card .h1-sample {
   margin: 0;
   font: 600 20px/1.2 var(--font-sans);
   letter-spacing: -0.015em;

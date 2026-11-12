@@ -6,9 +6,27 @@ package ui
 // PageHeader is the page title with its subtitle line and the page's buttons (children) on the
 // right: h1 22 px, subtitle 13 px.
 templ PageHeader(title, sub string) {
+	@pageHeader(title, sub, false) {
+		{ children... }
+	}
+}
+
+// PageHeaderSample is PageHeader for a sample on /styleguide: the title is a div with the h1
+// styling, because the page around the sample already has its own h1 (#515).
+templ PageHeaderSample(title, sub string) {
+	@pageHeader(title, sub, true) {
+		{ children... }
+	}
+}
+
+templ pageHeader(title, sub string, sample bool) {
 	<div class="pghead">
 		<div class="pghead-t">
-			<h1>{ title }</h1>
+			if sample {
+				<div class="h1-sample">{ title }</div>
+			} else {
+				<h1>{ title }</h1>
+			}
 			if sub != "" {
 				<p class="pghead-sub">{ sub }</p>
 			}
@@ -593,10 +611,24 @@ templ Skeleton(label string, rows int) {
 // ErrorPage is a full error page: the status code, a title, the explanation, the path that
 // failed and two ways on.
 templ ErrorPage(code, title, body, path string, primary, secondary Btn) {
+	@errorPage(code, title, body, path, primary, secondary, false)
+}
+
+// ErrorPageSample is ErrorPage for a sample on /styleguide: the title is a div with the h1
+// styling, because the page around the sample already has its own h1 (#515).
+templ ErrorPageSample(code, title, body, path string, primary, secondary Btn) {
+	@errorPage(code, title, body, path, primary, secondary, true)
+}
+
+templ errorPage(code, title, body, path string, primary, secondary Btn, sample bool) {
 	<div class="errpage">
 		<div class="errpage-in">
 			<span class="errpage-code">{ code }</span>
-			<h1>{ title }</h1>
+			if sample {
+				<div class="h1-sample">{ title }</div>
+			} else {
+				<h1>{ title }</h1>
+			}
 			<p>{ body }</p>
 			if path != "" {
 				<div class="errpage-path">{ path }</div>

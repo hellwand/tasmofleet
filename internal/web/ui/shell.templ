@@ -358,19 +358,33 @@ templ PhoneTitleOOB(title string) {
 templ crumbsNav(trail []Crumb, base string, attrs templ.Attributes) {
 	if len(trail) > 0 {
 		<nav class="crumbs" id="crumbs" aria-label="Breadcrumb" { attrs... }>
-			for i, c := range trail {
-				if i > 0 {
-					<span class="crumb-sep" aria-hidden="true">/</span>
-				}
-				if c.Path != "" {
-					<a href={ templ.SafeURL(base + c.Path) } data-keep-query?={ c.KeepQuery }>{ c.Label }</a>
-				} else if i == len(trail)-1 {
-					<span class="crumb-here" aria-current="page">{ c.Label }</span>
-				} else {
-					<span class="crumb-here">{ c.Label }</span>
-				}
-			}
+			@crumbSteps(trail, base)
 		</nav>
+	}
+}
+
+// CrumbsSample is Crumbs for a sample on /styleguide: no id and no Breadcrumb landmark (role
+// presentation), because the shell's trail on the same page owns both (#515).
+templ CrumbsSample(trail []Crumb, base string) {
+	if len(trail) > 0 {
+		<nav class="crumbs" role="presentation">
+			@crumbSteps(trail, base)
+		</nav>
+	}
+}
+
+templ crumbSteps(trail []Crumb, base string) {
+	for i, c := range trail {
+		if i > 0 {
+			<span class="crumb-sep" aria-hidden="true">/</span>
+		}
+		if c.Path != "" {
+			<a href={ templ.SafeURL(base + c.Path) } data-keep-query?={ c.KeepQuery }>{ c.Label }</a>
+		} else if i == len(trail)-1 {
+			<span class="crumb-here" aria-current="page">{ c.Label }</span>
+		} else {
+			<span class="crumb-here">{ c.Label }</span>
+		}
 	}
 }
 

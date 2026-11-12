@@ -1,6 +1,9 @@
 package web
 
-import "github.com/hellwand/tasmofleet/internal/web/ui"
+import (
+	"github.com/hellwand/tasmofleet/internal/policy"
+	"github.com/hellwand/tasmofleet/internal/web/ui"
+)
 
 // sgView is the style guide's data: the shell data (for the user menu and the drawer shown in
 // the flow), the base path and the CSRF token of the sample forms.
@@ -159,7 +162,7 @@ templ styleguidePage(v sgView) {
 					@ui.RadioCards("Sign-in method", "sg-auth", []ui.Option{{Value: "otp", Label: "One-time password", Text: "The user sets their own password at the first sign-in.", Checked: true}, {Value: "set", Label: "Set an initial password", Text: "You pass the password on yourself."}})
 				</div>
 				<div class="sg-stack">
-					@ui.Segmented("Severity", "sg-sev", []ui.Option{{Value: "warn", Label: "Advisory"}, {Value: "require", Label: "Required", Checked: true}})
+					@ui.Segmented("Severity", "sg-sev", severityOptions(policy.SeverityWarn))
 					@ui.Segmented("Diff layout", "sg-layout", []ui.Option{{Value: "side", Label: "Side by side", Checked: true}, {Value: "uni", Label: "Unified"}})
 					@ui.Check("sg-keep", "Keep me signed in", "", true, false)
 					@ui.Check("sg-names", "Device names in metric labels", "Off: labels use the device ID only.", false, true)
@@ -198,8 +201,8 @@ templ styleguidePage(v sgView) {
 			</div>
 		}
 		@sgSec("tabs") {
-			@ui.Crumbs([]ui.Crumb{{Label: "Devices", Path: "/styleguide"}, {Label: "Balcony Windowsill", Path: "/styleguide"}}, v.Base)
-			@ui.PageHeader("Balcony Windowsill", "Sonoff Basic · Tasmota 14.2.0") {
+			@ui.CrumbsSample([]ui.Crumb{{Label: "Devices", Path: "/styleguide"}, {Label: "Balcony Windowsill", Path: "/styleguide"}}, v.Base)
+			@ui.PageHeaderSample("Balcony Windowsill", "Sonoff Basic · Tasmota 14.2.0") {
 				@ui.Button(ui.Btn{Label: "Restart…"})
 				@ui.Button(ui.Btn{Label: "Back up now", Kind: "primary"})
 			}
@@ -241,11 +244,11 @@ templ styleguidePage(v sgView) {
 			@ui.Skeleton("Loading devices…", 4)
 		}
 		@sgSec("errors") {
-			@ui.ErrorPage("404", "This page doesn't exist", "The address may be mistyped, or the device or transaction it pointed to was deleted.", "/devices/d99", ui.Btn{Label: "Go to the dashboard", Kind: "primary", Href: v.Base + "/styleguide"}, ui.Btn{Label: "All devices", Href: v.Base + "/styleguide"})
+			@ui.ErrorPageSample("404", "This page doesn't exist", "The address may be mistyped, or the device or transaction it pointed to was deleted.", "/devices/d99", ui.Btn{Label: "Go to the dashboard", Kind: "primary", Href: v.Base + "/styleguide"}, ui.Btn{Label: "All devices", Href: v.Base + "/styleguide"})
 		}
 		@sgSec("auth") {
 			@ui.AuthCard(v.Base, "1.4.2", "fleet.lab.home") {
-				<h1>Sign in</h1>
+				<div class="h1-sample">Sign in</div>
 				@ui.Banner(ui.BannerData{Tone: ui.ToneDanger, Title: "Wrong username or password.", Text: "2 attempts left before this account is locked for 15 minutes.", Alert: true})
 				@ui.Field(ui.FieldData{Label: "Username", Name: "sg-user", Value: "maren", Autocomplete: "off"})
 				@ui.Field(ui.FieldData{Label: "Password", Name: "sg-pass", Type: "password", Error: "Check the password and try again.", Autocomplete: "off"})
