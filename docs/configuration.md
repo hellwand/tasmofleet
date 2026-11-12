@@ -100,7 +100,7 @@ New settings get a page field, not a variable.
 | `TASMOFLEET_BACKUP_MAX_AGE`               | legacy    | `720h`                         | no            | Backups younger than this are never pruned.                                                                                                                                                                             |
 | `TASMOFLEET_BACKUP_DAYS`                  | legacy    |                                | no            | Weekdays of the scheduled device backup, comma separated: `mon,tue,wed,thu,fri,sat,sun`. Empty = manual only. Set on Devices, Backups.                                                                                  |
 | `TASMOFLEET_BACKUP_TIME`                  | legacy    | `03:00`                        | no            | Time of day (`HH:MM`) of the scheduled device backup, on the container clock (`TZ`). A run missed while TasmoFleet was down starts late within 60 minutes, else it is skipped and a notification is sent. A run never starts at TasmoFleet start or when the schedule is saved. |
-| `TASMOFLEET_SNAPSHOT_DAYS`                | legacy    |                                | no            | Weekdays of the scheduled snapshots of the TasmoFleet database into `<data dir>/snapshots` (`tasmofleet-YYYYMMDD-HHMMZ.db`, UTC), comma separated: `mon,tue,wed,thu,fri,sat,sun`. Empty = off. System, Snapshots. |
+| `TASMOFLEET_SNAPSHOT_DAYS`                | legacy    |                                | no            | Weekdays of the scheduled snapshots of the TasmoFleet database into `<data dir>/snapshots` (`tasmofleet-YYYYMMDD-HHMMZ.db`, UTC regardless of `TZ`, see [Time zone](#time-zone)), comma separated: `mon,tue,wed,thu,fri,sat,sun`. Empty = off. System, Snapshots. |
 | `TASMOFLEET_SNAPSHOT_TIME`                | legacy    | `03:00`                        | no            | Time of day (`HH:MM`) of the scheduled snapshot, on the container clock (`TZ`). A snapshot missed while TasmoFleet was down is taken late within 60 minutes, else it is skipped and a notification is sent. A snapshot is never taken at TasmoFleet start or when the schedule is saved. |
 | `TASMOFLEET_SNAPSHOT_KEEP`                | legacy    | `7`                            | no            | Scheduled snapshots kept; the oldest are deleted first. Download and restore: [Backing up TasmoFleet](backing-up.md). |
 | `TASMOFLEET_DISCOVERY_MQTT`               | legacy    | `true`                         | no            | Listen for Tasmota discovery messages (needs MQTT).                                                                                                                                                                     |
@@ -190,6 +190,10 @@ installs behave as described above.
 - **It changes**: log timestamps, the no-JavaScript fallback text of absolute times, the
   relative texts ("Today 09:41", "Yesterday ...") and plain sentences such as restore banners.
 - **It does not change**: absolute times in the UI are shown in the browser's time zone.
+- **It does not change**: the times in the names of scheduled snapshots. They are always UTC, which the trailing `Z`
+  marks, so the names stay unique and in order when the clocks change in autumn: `tasmofleet-20261106-0800Z.db` was
+  taken at 09:00 in Central European Time (10:00 in summer time). `SNAPSHOT_TIME` itself is on the container clock;
+  the list on System, Snapshots shows each snapshot on your browser's clock.
 
 ```sh
 docker run -d --name tasmofleet -p 8443:8080 -p 80:80 -e TZ=Europe/Berlin -v tasmofleet-data:/data ghcr.io/hellwand/tasmofleet:latest
