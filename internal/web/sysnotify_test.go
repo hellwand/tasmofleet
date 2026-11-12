@@ -322,7 +322,7 @@ func TestMessagePreviewCaptionNamesTheRequestAndTheLinkFollowsPublicURL(t *testi
 			t.Fatal(err)
 		}
 		_, page := e.do(t, "GET", "/settings/system?tab=notifications", "admin", nil)
-		if strings.Contains(page, "Webhook body.") || !strings.Contains(page, "The whole webhook request") || !strings.Contains(page, "with the link when PUBLIC_URL is set") {
+		if strings.Contains(page, "Webhook body.") || !strings.Contains(page, "The whole webhook request") || !strings.Contains(page, "with the link when TASMOFLEET_PUBLIC_URL is set") {
 			t.Errorf("PUBLIC_URL=%q: caption does not name the whole request and the conditional link", tc.public)
 		}
 		if !strings.Contains(page, "Title: Update job #41") {

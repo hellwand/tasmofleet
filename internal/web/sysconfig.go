@@ -526,7 +526,7 @@ func (h *handler) sysOutcome(w http.ResponseWriter, r *http.Request, posted map[
 		// for single sign-on) has no field to sit at: say it in the summary.
 		for _, k := range sortedKeys(ve.Fields) {
 			if _, editable := sysconfig.Lookup(k); !editable {
-				p.Error += " " + k + ": " + ve.Fields[k] + " (set it in the container configuration)."
+				p.Error += " " + sysEnvName(k) + ": " + ve.Fields[k] + " (set it in the container configuration)."
 			}
 		}
 		h.sysRender(w, r, http.StatusUnprocessableEntity, p)
@@ -918,6 +918,28 @@ func sysPlaceholder(row sysRow) string {
 		return "192.168.1.0/24"
 	}
 	return ""
+}
+
+// sysEnvName is the name of a setting as the container environment reads it. Only TASMOFLEET_ names
+// count there; the short name is valid only inside the env file, so a hint never prints it (#719).
+func sysEnvName(key string) string { return config.Prefix + key }
+
+// sysEnvNames is sysEnvName for a list.
+func sysEnvNames(keys []string) []string {
+	out := make([]string, len(keys))
+	for i, k := range keys {
+		out[i] = sysEnvName(k)
+	}
+	return out
+}
+
+// sysLockedHelp is the help of a setting the container configuration fixes: which variable to change,
+// or, when the lock comes from the issuer or client secret partner, why it is locked and what to add.
+func sysLockedHelp(row sysRow) string {
+	if row.LockNote != "" {
+		return row.LockNote
+	}
+	return sysEnvName(row.Key) + " in the container configuration."
 }
 
 // sysSetWord says whether a secret from the environment has a value, never the value.

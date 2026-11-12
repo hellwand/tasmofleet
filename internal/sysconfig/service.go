@@ -319,6 +319,7 @@ type FieldState struct {
 	Skipped        string // why a stored value was ignored
 	NeedsReentry   bool   // a stored secret is not used until it is entered again
 	Locked         bool   // set by the environment (sign-in settings only): read-only
+	LockNote       string // why a lock the environment did not set directly holds (issuer and client secret lock together); empty otherwise
 }
 
 // State describes every editable field.
@@ -342,7 +343,7 @@ func (s *Service) State() []FieldState {
 			st.Source, st.StoredBy = SourceStored, r.UpdatedBy
 		}
 		if s.cur.IsLocked(f.Key) {
-			st.Locked, st.Source = true, SourceEnv
+			st.Locked, st.Source, st.LockNote = true, SourceEnv, s.base.LockNote(f.Key)
 		}
 		st.PendingRestart = f.Apply == Restart && !config.Equal(s.start, s.cur, f.Key)
 		if why, ok := s.skipped[f.Key]; ok {

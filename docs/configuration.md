@@ -27,6 +27,14 @@ configured on the System settings page after the first sign-in and stored in the
 | **lock**      | Optional. Left unset, the setting is edited on the System settings page. Set, the variable wins and the field is read-only.                        |
 | **legacy**    | Imported into the database once, at the first start that still sees it, and ignored afterwards. Remove it; the settings page owns the setting.     |
 
+**Issuer and client secret: both as variables, or neither.** `TASMOFLEET_OIDC_ISSUER` and
+`TASMOFLEET_OIDC_CLIENT_SECRET` (or its `_FILE`) lock together, so that a secret fixed by the operator only
+goes to the issuer fixed by the operator. Set only the secret and the issuer is locked to an empty value: an
+issuer saved on the settings page is ignored, stored single sign-on is off, and the start log says so in one
+warning that names `TASMOFLEET_OIDC_ISSUER` as missing. The start does not fail and local sign-in works.
+Set only the issuer and the secret field is locked the same way; a client secret saved on the page is ignored.
+The page names the variable that is missing next to the locked field and in "Stored values that are ignored".
+
 New settings get a page field, not a variable.
 
 ## Variables

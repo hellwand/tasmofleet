@@ -66,7 +66,7 @@ func TestSystemSettingsMetricsTokenFieldAndLock(t *testing.T) {
 
 	e, _, _, _ = sysEnvFull(t, true, nil, "TASMOFLEET_METRICS_TOKEN=fake-env-token-6")
 	_, body = e.do(t, "GET", "/settings/system", "admin", nil)
-	if strings.Contains(body, `name="v.METRICS_TOKEN"`) || !strings.Contains(body, "METRICS_TOKEN in the container configuration") {
+	if strings.Contains(body, `name="v.METRICS_TOKEN"`) || !strings.Contains(body, "TASMOFLEET_METRICS_TOKEN in the container configuration") {
 		t.Errorf("env token must lock the field:\n%s", body)
 	}
 	if strings.Contains(body, "fake-env-token-6") {
