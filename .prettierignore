@@ -1,0 +1,16 @@
+# Prettier is not a dependency of this repo; it runs from the maintainer's
+# editor hook. These paths are hand-formatted or generated: formatting them
+# rewrites whole files (e2e specs are written with long lines) or changes
+# what Markdown renders (docs/spec: DEVICE_NETWORKS ... _write_ turns into
+# broken emphasis). See also .prettierrc: .prettierignore is resolved from the
+# working directory, so the same paths carry requirePragma there, which holds
+# from any directory.
+docs/spec/
+e2e/
+testdata/
+**/testdata/
+design/
+internal/tasmotacmd/*.json
+internal/web/static/htmx-*.js
+site/
+deploy/grafana/

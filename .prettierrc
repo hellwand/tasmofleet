@@ -1,0 +1,35 @@
+{
+  "overrides": [
+    {
+      "files": [
+        "docs/spec/**",
+        "e2e/**",
+        "testdata/**",
+        "**/testdata/**",
+        "design/**",
+        "internal/tasmotacmd/*.json",
+        "internal/web/static/htmx-*.js",
+        "site/**",
+        "deploy/grafana/**"
+      ],
+      "options": {
+        "requirePragma": true
+      }
+    },
+    {
+      "files": [
+        "e2e/**/*.json",
+        "testdata/**/*.json",
+        "**/testdata/**/*.json",
+        "design/**/*.json",
+        "internal/tasmotacmd/*.json",
+        "site/**/*.json",
+        "deploy/grafana/**/*.json"
+      ],
+      "options": {
+        "parser": "json-stringify",
+        "requirePragma": true
+      }
+    }
+  ]
+}
