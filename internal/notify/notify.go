@@ -136,24 +136,57 @@ func UpdateFinished(c config.Config, batch int64, ok, failed, cancelled int, tar
 		Context: fmt.Sprintf("update job #%d (%s)", batch, res)}
 }
 
-// maxNamed is how many device names a message lists before it says "and N more".
+// maxNamed is how many devices a message lists before it says "and N more".
 const maxNamed = 10
 
+// FailedDevice is one device of a failed scheduled backup as the message words it: where to find
+// it (Name, Hostname the device reported, Address as the person types it) and why it failed.
+// Reason is a sentence written for the person, never a raw error (CLAUDE.md safety rule 4).
+type FailedDevice struct {
+	Name, Hostname, Address, Reason string
+}
+
+// line is "- Name (hostname, address): reason". The hostname is left out when it is empty or
+// repeats the address or the name; so are the brackets when nothing is left, and the colon
+// without a reason.
+func (f FailedDevice) line() string {
+	var where []string
+	if f.Hostname != "" && f.Hostname != f.Address && f.Hostname != f.Name {
+		where = append(where, f.Hostname)
+	}
+	if f.Address != "" {
+		where = append(where, f.Address)
+	}
+	l := "- " + f.Name
+	if len(where) > 0 {
+		l += " (" + strings.Join(where, ", ") + ")"
+	}
+	if f.Reason != "" {
+		l += ": " + f.Reason
+	}
+	return l
+}
+
 // BackupFailed is the event of a scheduled backup run in which some devices failed: one message
-// per run, listing the devices.
-func BackupFailed(c config.Config, total int, failed []string, at time.Time) Event {
+// per run, one line per device with its address and reason (#685), linking to the failed rows of
+// the Backups page.
+func BackupFailed(c config.Config, total int, failed []FailedDevice, at time.Time) Event {
 	shown := failed
 	more := 0
 	if len(shown) > maxNamed {
 		shown, more = shown[:maxNamed], len(shown)-maxNamed
 	}
-	text := "Failed: " + strings.Join(shown, ", ")
-	if more > 0 {
-		text += fmt.Sprintf(" and %d more", more)
+	lines := []string{"Failed:"}
+	for _, f := range shown {
+		lines = append(lines, f.line())
 	}
+	if more > 0 {
+		lines = append(lines, fmt.Sprintf("and %d more", more))
+	}
+	const path = "/devices/backups?filter=failed"
 	return Event{Name: EventBackupFailed, Result: ResultFailed,
-		Title: fmt.Sprintf("Scheduled backup: %d of %d devices failed", len(failed), total), Text: text,
-		URL: Link(c, "/devices"), Path: "/devices", Time: at, Context: "scheduled backup"}
+		Title: fmt.Sprintf("Scheduled backup: %d of %d devices failed", len(failed), total), Text: strings.Join(lines, "\n"),
+		URL: Link(c, path), Path: path, Time: at, Context: "scheduled backup"}
 }
 
 // BackupMissed is the event of a scheduled backup run that did not happen: TasmoFleet was not

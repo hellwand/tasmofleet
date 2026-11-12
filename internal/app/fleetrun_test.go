@@ -21,6 +21,7 @@ import (
 	"github.com/hellwand/tasmofleet/internal/devlock"
 	"github.com/hellwand/tasmofleet/internal/events"
 	"github.com/hellwand/tasmofleet/internal/model"
+	"github.com/hellwand/tasmofleet/internal/notify"
 	"github.com/hellwand/tasmofleet/internal/secretbox"
 	"github.com/hellwand/tasmofleet/internal/store"
 	"github.com/hellwand/tasmofleet/internal/sysconfig"
@@ -38,10 +39,10 @@ type fleetEnv struct {
 	locks   *devlock.Locks
 	holds   *devlock.FirmwareHolds
 	mu      sync.Mutex
-	tried   []string         // devices a backup was started on
-	fail    map[string]error // device name -> backup error
-	notes   [][]string       // failed device names per notification
-	notesN  []int            // tried count per notification
+	tried   []string                // devices a backup was started on
+	fail    map[string]error        // device name -> backup error
+	notes   [][]notify.FailedDevice // failed devices per notification
+	notesN  []int                   // tried count per notification
 	devices map[string]model.DeviceID
 }
 
@@ -81,7 +82,7 @@ func newFleetEnv(t *testing.T) *fleetEnv {
 			e.tried = append(e.tried, name)
 			return e.fail[name]
 		},
-		notifyFailed: func(tried int, failed []string, _ time.Time) {
+		notifyFailed: func(tried int, failed []notify.FailedDevice, _ time.Time) {
 			e.notes, e.notesN = append(e.notes, failed), append(e.notesN, tried)
 		},
 	}
@@ -122,6 +123,14 @@ func (e *fleetEnv) last(t *testing.T) model.BackupRun {
 		t.Fatalf("no stored run: ok=%v err=%v", ok, err)
 	}
 	return r
+}
+
+func failedNames(fs []notify.FailedDevice) []string {
+	var names []string
+	for _, f := range fs {
+		names = append(names, f.Name)
+	}
+	return names
 }
 
 func item(r model.BackupRun, name string) model.BackupRunItem {
@@ -263,7 +272,7 @@ func TestScheduledBackupTwoFailedThreeSkippedWarnsOnTheFailuresOnly(t *testing.T
 	if s.LastTotal != 4 || s.LastFailed != 2 || s.LastSkipped != 3 {
 		t.Errorf("status = %+v, want 4 tried, 2 failed, 3 skipped", s)
 	}
-	if len(e.notes) != 1 || strings.Join(e.notes[0], ",") != "bad1,bad2" || e.notesN[0] != 4 {
+	if len(e.notes) != 1 || strings.Join(failedNames(e.notes[0]), ",") != "bad1,bad2" || e.notesN[0] != 4 {
 		t.Errorf("notifications = %v (tried %v), want one naming bad1 and bad2 of 4", e.notes, e.notesN)
 	}
 	r := e.last(t)
@@ -630,5 +639,64 @@ func TestScheduledBackupAndBackupsPageAreWiredToTheAPIOffRule(t *testing.T) {
 		if got := hook(context.Background(), 1, hs[1]); got != skipAPIOff {
 			t.Errorf("%s: %q, want %q", name, got, skipAPIOff)
 		}
+	}
+}
+
+// Why (#685): the message must let the person find the device and tell whether they must act, so
+// each failed device reaches the notifier with its address and the reason the history shows. The
+// reason comes from backup.AttemptReason: fixed sentences, never the raw error, which can carry a
+// URL with a password (CLAUDE.md safety rule 4).
+func TestScheduledBackupNotificationCarriesAddressAndReasonNotTheRawError(t *testing.T) {
+	e := newFleetEnv(t)
+	e.dev(t, "ok", fleetT0, model.Health{State: model.HealthOnline})
+	e.dev(t, "mute", fleetT0, model.Health{State: model.HealthOnline})
+	e.dev(t, "blocked", fleetT0, model.Health{State: model.HealthOnline})
+	e.dev(t, "leaky", fleetT0, model.Health{State: model.HealthOnline})
+	e.fail["mute"] = fmt.Errorf("GET http://admin:hunter2@192.0.2.2/dl: %w", tasmota.ErrUnreachable)
+	e.fail["blocked"] = &transport.BackupBlockedError{Err: tasmota.ErrHTTPAPIRefused, Reason: "the web API is off and the device has no MQTT password stored"}
+	e.fail["leaky"] = errors.New("login admin:hunter2 failed")
+	e.b.Run(context.Background())
+	if len(e.notes) != 1 || len(e.notes[0]) != 3 {
+		t.Fatalf("notifications = %+v, want one naming the three failed devices", e.notes)
+	}
+	by := map[string]notify.FailedDevice{}
+	for _, f := range e.notes[0] {
+		by[f.Name] = f
+	}
+	if f := by["mute"]; f.Address != "192.0.2.2" || f.Reason != "The device did not answer" {
+		t.Errorf("mute = %+v, want its address and the unreachable reason", f)
+	}
+	if f := by["blocked"]; f.Address != "192.0.2.3" || f.Reason != "The web API is off and the device has no MQTT password stored" {
+		t.Errorf("blocked = %+v, want the sentence the transport wrote for the person", f)
+	}
+	if f := by["leaky"]; f.Reason != "The device did not hand over its configuration" {
+		t.Errorf("leaky = %+v, want the generic reason", f)
+	}
+	text := notify.BackupFailed(config.Config{}, 4, e.notes[0], fleetT0).Text
+	if strings.Contains(text, "hunter2") || strings.Contains(text, "admin") {
+		t.Errorf("message leaks a credential from an error: %q", text)
+	}
+}
+
+// Why (#685): the address is what the person types to reach the device, so a non-default HTTP
+// port is part of it, and the hostname the device reported helps when the address is a lease.
+func TestScheduledBackupNotificationShowsPortAndReportedHostname(t *testing.T) {
+	e := newFleetEnv(t)
+	id, err := e.st.CreateDevice(context.Background(), model.Device{Name: "porty", Address: "192.0.2.1", Port: 8080, Net: model.NetFacts{Hostname: "tasmota-porty"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	e.devices["porty"] = id
+	if err := e.st.SetLastSeen(context.Background(), id, model.HealthOnline, fleetT0); err != nil {
+		t.Fatal(err)
+	}
+	e.health[id] = model.Health{DeviceID: id, State: model.HealthOnline}
+	e.fail["porty"] = tasmota.ErrTimeout
+	e.b.Run(context.Background())
+	if len(e.notes) != 1 || len(e.notes[0]) != 1 {
+		t.Fatalf("notifications = %+v", e.notes)
+	}
+	if f := e.notes[0][0]; f.Address != "192.0.2.1:8080" || f.Hostname != "tasmota-porty" || f.Reason != "The device took too long to answer" {
+		t.Errorf("failed device = %+v", f)
 	}
 }
