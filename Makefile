@@ -77,7 +77,7 @@ agent-refs:
 # (MUTATION_SHARD=i/MUTATION_CI_SHARDS, tools/mutation-shard.sh) into shards. Fails when a package
 # is in no race shard, or a file of a MUTATION package is dealt to no (or two) mutation shards.
 # "make mutation-plan" prints the plan with the estimated load per shard.
-MUTATION_CI_SHARDS := 4
+MUTATION_CI_SHARDS := 5
 MUTATION_PKGS := $(foreach e,$(MUTATION),$(firstword $(subst :, ,$(e))))
 export MUTATION_PKGS
 shards-check:

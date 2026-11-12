@@ -1,12 +1,12 @@
-# Mutation shard weights, see tools/mutation-weights.sh. Line: <pkg> <file> <runnable mutants> [seconds per mutant x 100, overriding the package cost]. Counts from a gremlins dry run of 2026-11-12; the costs are the earlier ones scaled per package by measured over estimated seconds in the weekly runs 41510561121 (2026-11-02) and 42542151416 (2026-11-09).
+# Mutation shard weights, see tools/mutation-weights.sh. Line: <pkg> <file> <runnable mutants> [seconds per mutant x 100, overriding the package cost]. Counts from a gremlins dry run of 2026-11-12; the costs are the earlier ones scaled per package by measured over estimated seconds in the weekly runs 41510561121 (2026-11-02), 42542151416 (2026-11-09) and 43309125119 (2026-11-12, first run with these weights).
 cost internal/fwselect 103
-cost internal/ota 199
+cost internal/ota 179
 cost internal/policy 75
 cost internal/cmdpolicy 30
 cost internal/mqttcmd 514
 cost internal/transport 99
 cost internal/tasmota 315
-cost internal/restore 1180
+cost internal/restore 1298
 internal/fwselect decide.go 10 52
 internal/fwselect detect.go 48 52
 internal/fwselect family.go 15 76
@@ -17,17 +17,17 @@ internal/fwselect language.go 4
 internal/fwselect mqttupload.go 12 74
 internal/fwselect plan.go 12 52
 internal/fwselect select.go 45 76
-internal/ota backupjob.go 12 182
-internal/ota batchopts.go 4 140
-internal/ota commandjob.go 19 167
-internal/ota deviceapi.go 31 272
-internal/ota engine.go 154 244
-internal/ota engine_safeboot.go 1 171
-internal/ota machine.go 66 140
-internal/ota machine_safeboot.go 22 272
-internal/ota mqttpath.go 8 275
-internal/ota policyjob.go 48 195
-internal/ota push.go 18 182
+internal/ota backupjob.go 12 164
+internal/ota batchopts.go 4 126
+internal/ota commandjob.go 19 150
+internal/ota deviceapi.go 31 245
+internal/ota engine.go 154 220
+internal/ota engine_safeboot.go 1 154
+internal/ota machine.go 66 126
+internal/ota machine_safeboot.go 22 245
+internal/ota mqttpath.go 8 248
+internal/ota policyjob.go 48 176
+internal/ota push.go 18 164
 internal/ota rowgone.go 0
 internal/ota templatejob.go 85
 internal/policy decoded.go 9 111
@@ -67,9 +67,9 @@ internal/tasmota safeboot.go 8 323
 internal/tasmota status.go 0
 internal/tasmota tasmota.go 1 828
 internal/tasmota upload.go 33 357
-internal/restore files.go 97 281
-internal/restore flow.go 107 342
-internal/restore lockout.go 29 342
-internal/restore replace.go 98 458
-internal/restore restore.go 38 442
-internal/restore steps.go 2 458
+internal/restore files.go 97 309
+internal/restore flow.go 107 376
+internal/restore lockout.go 29 376
+internal/restore replace.go 98 504
+internal/restore restore.go 38 486
+internal/restore steps.go 2 504
