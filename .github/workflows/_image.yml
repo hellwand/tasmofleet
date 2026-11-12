@@ -158,12 +158,10 @@ jobs:
           {
             echo "ghcr_edge=$(digest "$ghcr:edge")"
             echo "ghcr_edge_kids=$(kids "$ghcr:edge")"
-            echo "ghcr_latest=$(digest "$ghcr:latest")"
             if [ "$DOCKERHUB" = true ]; then
               dh="docker.io/$(echo "$DOCKERHUB_USERNAME" | tr 'A-Z' 'a-z')/tasmofleet"
               echo "dh_edge=$(digest "$dh:edge")"
               echo "dh_edge_kids=$(kids "$dh:edge")"
-              echo "dh_latest=$(digest "$dh:latest")"
             fi
           } >> "$GITHUB_OUTPUT"
       # Smoke check, before any push: the arm64 image starts. QEMU is used for this run only.
@@ -211,11 +209,17 @@ jobs:
             org.opencontainers.image.licenses=AGPL-3.0-or-later
           cache-from: type=gha
           cache-to: ${{ inputs.mode == 'edge' && 'type=gha,mode=max' || '' }}
-      # Delete the manifest the old edge pointed to, unless edge did not move or latest still uses
-      # it. A failure here only warns: the image is already published.
+      # Delete the manifests the old edge pointed to (its index and the per-platform children), except every
+      # digest a tag points to now or that a tagged index lists as a child (#728). A child is only a digest:
+      # a re-run of the same commit builds a bit-identical image for a platform, and the new edge index then
+      # lists the same child as the old one; deleting it left :edge incomplete, and the nightly cleanup
+      # removed the "partial" image. The keep set is read from the registry after the push, and
+      # scripts/edge-cleanup.mjs decides (unit-tested); a lookup that fails ends the step before any delete.
+      # A failure here only warns: the image is already published.
       - name: delete the previous edge
         if: steps.prev.outcome == 'success'
         continue-on-error: true
+        shell: bash
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           OWNER: ${{ github.repository_owner }}
@@ -224,42 +228,77 @@ jobs:
           DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
           GHCR_EDGE: ${{ steps.prev.outputs.ghcr_edge }}
           GHCR_EDGE_KIDS: ${{ steps.prev.outputs.ghcr_edge_kids }}
-          DH_EDGE_KIDS: ${{ steps.prev.outputs.dh_edge_kids }}
-          GHCR_LATEST: ${{ steps.prev.outputs.ghcr_latest }}
           DH_EDGE: ${{ steps.prev.outputs.dh_edge }}
-          DH_LATEST: ${{ steps.prev.outputs.dh_latest }}
+          DH_EDGE_KIDS: ${{ steps.prev.outputs.dh_edge_kids }}
         run: |
-          set -u
-          digest() { docker buildx imagetools inspect "$1" --format '{{json .Manifest}}' 2>/dev/null | jq -r '.digest // empty'; }
+          set -euo pipefail
+          work=$(mktemp -d)
+          digest() { docker buildx imagetools inspect "$1" --format '{{json .Manifest}}' | jq -r '.digest // empty'; }
+          # the per-platform manifests an index points to, as a JSON array (empty for a single-platform image)
+          kids() { docker buildx imagetools inspect "$1" --format '{{json .Manifest}}' | jq -c '[.manifests[]?.digest]'; }
+          # tagged_json REPO LISTING: LISTING is [{digest, tags}], every tagged index of REPO as the registry
+          # lists it; :edge is resolved from the registry too (a listing can lag behind a push). Prints
+          # [{digest, tags, kids}].
+          tagged_json() {
+            edge=$(digest "$1:edge")
+            [ -n "$edge" ] || { echo "$1:edge does not resolve after the push" >&2; return 1; }
+            jq -c --arg edge "$edge" '. + [{digest: $edge, tags: ["edge"]}] | .[]' "$2" | while read -r entry; do
+              d=$(jq -r .digest <<<"$entry")
+              k=$(kids "$1@$d")
+              jq -c --argjson k "$k" '. + {kids: $k}' <<<"$entry"
+            done | jq -s .
+          }
+          # decide PREVIOUS_DIGESTS TAGGED_FILE: prints the digests to delete, one per line
+          decide() {
+            # shellcheck disable=SC2086 # PREVIOUS_DIGESTS is a space-separated list
+            jq -n --slurpfile t "$2" '{candidates: $ARGS.positional, tagged: $t[0]}' --args $1 |
+              node scripts/edge-cleanup.mjs | jq -r '.[]'
+          }
           owner=$(echo "$OWNER" | tr 'A-Z' 'a-z')
           ghcr="ghcr.io/$owner/tasmofleet"
-          now=$(digest "$ghcr:edge")
-          if [ -n "$GHCR_EDGE" ] && [ -n "$now" ] && [ "$GHCR_EDGE" != "$now" ] && [ "$GHCR_EDGE" != "$GHCR_LATEST" ]; then
-            # the index first, then the platform manifests it listed
-            for d in $GHCR_EDGE $GHCR_EDGE_KIDS; do
-              id=$(gh api "/users/$owner/packages/container/tasmofleet/versions?per_page=100" --jq ".[] | select(.name == \"$d\") | .id")
-              if [ -n "$id" ] && gh api -X DELETE "/users/$owner/packages/container/tasmofleet/versions/$id"; then
+          if [ -n "$GHCR_EDGE" ]; then
+            api="/users/$owner/packages/container/tasmofleet/versions"
+            gh api --paginate "$api?per_page=100" |
+              jq -s '[.[][] | {id, digest: .name, tags: (.metadata.container.tags // [])}]' >"$work/ghcr-versions.json"
+            jq '[.[] | select(.tags | length > 0) | {digest, tags}]' "$work/ghcr-versions.json" >"$work/ghcr-listing.json"
+            tagged_json "$ghcr" "$work/ghcr-listing.json" >"$work/ghcr-tagged.json"
+            todo=$(decide "$GHCR_EDGE $GHCR_EDGE_KIDS" "$work/ghcr-tagged.json")
+            echo "ghcr: the previous edge had $(echo "$GHCR_EDGE $GHCR_EDGE_KIDS" | wc -w) manifests, $(echo "$todo" | wc -w) are unused and deleted, the rest are still used by a tag"
+            for d in $todo; do
+              id=$(jq -r --arg d "$d" '.[] | select(.digest == $d) | .id' "$work/ghcr-versions.json")
+              if [ -n "$id" ] && gh api -X DELETE "$api/$id"; then
                 echo "ghcr: deleted the previous edge manifest $d"
               else
                 echo "::warning::ghcr: could not delete the previous edge manifest $d"
               fi
             done
           fi
-          if [ "$DOCKERHUB" = true ]; then
+          if [ "$DOCKERHUB" = true ] && [ -n "$DH_EDGE" ]; then
             user=$(echo "$DOCKERHUB_USERNAME" | tr 'A-Z' 'a-z')
-            now=$(digest "docker.io/$user/tasmofleet:edge")
-            if [ -n "$DH_EDGE" ] && [ -n "$now" ] && [ "$DH_EDGE" != "$now" ] && [ "$DH_EDGE" != "$DH_LATEST" ]; then
+            # Tags are listed publicly: one entry per tag with the digest it points to.
+            url="https://hub.docker.com/v2/repositories/$user/tasmofleet/tags?page_size=100"
+            : >"$work/dh-tags.ndjson"
+            while [ -n "$url" ] && [ "$url" != null ]; do
+              page=$(curl -fsS "$url")
+              echo "$page" | jq -c '.results[] | {name, digest}' >>"$work/dh-tags.ndjson"
+              url=$(echo "$page" | jq -r '.next')
+            done
+            jq -s 'group_by(.digest) | map({digest: .[0].digest, tags: map(.name)})' "$work/dh-tags.ndjson" >"$work/dh-listing.json"
+            tagged_json "docker.io/$user/tasmofleet" "$work/dh-listing.json" >"$work/dh-tagged.json"
+            todo=$(decide "$DH_EDGE $DH_EDGE_KIDS" "$work/dh-tagged.json")
+            echo "Docker Hub: the previous edge had $(echo "$DH_EDGE $DH_EDGE_KIDS" | wc -w) manifests, $(echo "$todo" | wc -w) are unused and deleted, the rest are still used by a tag"
+            if [ -n "$todo" ]; then
               token=$(curl -fsS -u "$DOCKERHUB_USERNAME:$DOCKERHUB_TOKEN" \
                 "https://auth.docker.io/token?service=registry.docker.io&scope=repository:$user/tasmofleet:pull,push,delete" | jq -r .token)
-              for d in $DH_EDGE $DH_EDGE_KIDS; do
-                code=$(curl -s -o /dev/null -w '%{http_code}' -X DELETE -H "Authorization: Bearer $token" \
-                  "https://registry-1.docker.io/v2/$user/tasmofleet/manifests/$d")
-                case "$code" in
-                  202 | 200) echo "Docker Hub: deleted the previous edge manifest $d" ;;
-                  *) echo "::warning::Docker Hub: deleting the previous edge manifest $d answered $code" ;;
-                esac
-              done
             fi
+            for d in $todo; do
+              code=$(curl -s -o /dev/null -w '%{http_code}' -X DELETE -H "Authorization: Bearer $token" \
+                "https://registry-1.docker.io/v2/$user/tasmofleet/manifests/$d")
+              case "$code" in
+                202 | 200) echo "Docker Hub: deleted the previous edge manifest $d" ;;
+                *) echo "::warning::Docker Hub: deleting the previous edge manifest $d answered $code" ;;
+              esac
+            done
           fi
       # The Docker Hub overview follows deploy/dockerhub/README.md with every release.
       - name: Docker Hub overview

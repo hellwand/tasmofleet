@@ -131,6 +131,18 @@ means nothing stops you: you have to know it. The full working rules are in
 - **Enforced:** not enforced, convention. The fail-loud check on missing credentials
   on `main` and `v*` tags is what made the failure visible.
 
+### The previous edge was deleted together with a child the new edge uses (#728)
+
+- **Happened:** after a re-run of the `main.yml` run of one commit, `ghcr.io/.../tasmofleet:edge` was gone. The step
+  "delete the previous edge" deleted the old edge index and the platform manifests it listed. The re-run had built a
+  bit-identical arm64 image, so the new edge index listed the same arm64 manifest; the nightly `ghcr-cleanup` then
+  found the new edge incomplete (a "partial image") and deleted it too.
+- **Rule:** a platform manifest of a multi-arch index is just a digest, and two indexes can share it. Before deleting
+  a manifest of the old edge, read from the registry (after the push) which digests the tagged indexes use and
+  which children they list, and keep all of those. `scripts/edge-cleanup.mjs` decides, with tests; do not infer what
+  is unused from the order of events or from comparing two indexes.
+- **Enforced:** `make scripts-test` (the decision). The registry calls around it only run on `main` (`_image.yml`, mode edge).
+
 ### The nightly stayed red for days (#485, #428)
 
 - **Happened:** 5 of 9 nightly FULL runs failed, and #428 was closed while the

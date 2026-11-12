@@ -33,6 +33,8 @@ SAFETY package, catalogue, image paths). Every gate runs through the Makefile.
   fast-forward push of a PR head that was green, so the e2e shards would repeat the PR (#478). The tests run, cacheable, so
   that main's go test cache holds their results for the PRs and tags (the nightly runs `-count=1` and stores none); the
   e2e caches are refreshed by the nightly. The `:edge` image and the HA app image follow.
+  A new `:edge` replaces the old one; the old index and its per-platform manifests are then deleted, except every digest a
+  tagged index still uses (`scripts/edge-cleanup.mjs`, #728), so a re-run of a commit cannot leave `:edge` incomplete.
 - **RELEASE** (`release.yml`, tags `vX.Y.Z`): no tests of its own (#554). `main` moves only by a fast-forward push of a
   green PR head, so the tagged commit has already passed the FAST tier on its PR (`required`) and lint, unit and integration
   tests and the build on `main` (`main.yml`); running them again on identical code only delayed the image. Job `guards` fails at once, with the reason, when the
