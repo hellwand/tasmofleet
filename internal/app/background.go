@@ -234,7 +234,7 @@ func (a *runtime) scheduledBackup() *scheduledBackup {
 		},
 	}
 	if a.notifier != nil {
-		b.notifyFailed = func(tried int, failed []string, at time.Time) {
+		b.notifyFailed = func(tried int, failed []notify.FailedDevice, at time.Time) {
 			a.notifier.Emit(notify.BackupFailed(a.notifier.Config(), tried, failed, at))
 		}
 	}

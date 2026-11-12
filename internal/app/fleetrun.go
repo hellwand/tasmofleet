@@ -9,6 +9,8 @@ import (
 	"github.com/hellwand/tasmofleet/internal/backup"
 	"github.com/hellwand/tasmofleet/internal/devlock"
 	"github.com/hellwand/tasmofleet/internal/model"
+	"github.com/hellwand/tasmofleet/internal/netaddr"
+	"github.com/hellwand/tasmofleet/internal/notify"
 	"github.com/hellwand/tasmofleet/internal/store"
 	"github.com/hellwand/tasmofleet/internal/tasmota"
 )
@@ -32,8 +34,8 @@ type scheduledBackup struct {
 	enter  func(ctx context.Context, id model.DeviceID, owner string) (release func(), err error)
 	backup func(ctx context.Context, id model.DeviceID) error
 	// notifyFailed tells the person about the failed devices of a run: tried is how many devices
-	// were tried, failed their names.
-	notifyFailed func(tried int, failed []string, at time.Time)
+	// were tried, failed the devices that failed with where to find them and why.
+	notifyFailed func(tried int, failed []notify.FailedDevice, at time.Time)
 	// apiOffSkip says "HTTP API off" for an online device whose HTTP API is off and which no other path can back up
 	// (apiOffSkip in the runtime); nil or "" tries the device.
 	apiOffSkip func(ctx context.Context, id model.DeviceID, h model.Health) string
@@ -126,7 +128,7 @@ func (b *scheduledBackup) Run(ctx context.Context) {
 		}
 		b.run.Finish(completed)
 	}()
-	var failed []string
+	var failed []notify.FailedDevice
 	add := func(d model.Device, out model.BackupOutcome, reason string, since time.Time) {
 		rec.Items = append(rec.Items, model.BackupRunItem{DeviceID: d.ID, DeviceName: d.Name, Outcome: out, Reason: reason, Since: since, At: b.now()})
 		switch out {
@@ -136,7 +138,7 @@ func (b *scheduledBackup) Run(ctx context.Context) {
 		case model.BackupOutcomeFailed:
 			rec.Failed++
 			rec.Tried++
-			failed = append(failed, d.Name)
+			failed = append(failed, notify.FailedDevice{Name: d.Name, Hostname: d.Net.Hostname, Address: netaddr.Display(d.Address, d.Port, "http"), Reason: reason})
 		case model.BackupOutcomeSkipped:
 			rec.Skipped++
 		}

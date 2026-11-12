@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"net/mail"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -39,7 +40,7 @@ func newDispatcher(c *config.Config, log *bytes.Buffer) *Dispatcher {
 func TestOnlySelectedEventsAreSent(t *testing.T) {
 	ok, partial, failed := UpdateFinished(baseConfig(), 1, 3, 0, 0, "1", t0), UpdateFinished(baseConfig(), 2, 2, 1, 0, "1", t0), UpdateFinished(baseConfig(), 3, 0, 2, 0, "1", t0)
 	cancelled := UpdateFinished(baseConfig(), 4, 0, 0, 2, "1", t0)
-	bk, sn := BackupFailed(baseConfig(), 5, []string{"a"}, t0), SnapshotFailed(baseConfig(), "disk full", t0)
+	bk, sn := BackupFailed(baseConfig(), 5, []FailedDevice{{Name: "a"}}, t0), SnapshotFailed(baseConfig(), "disk full", t0)
 	cases := []struct {
 		name string
 		mod  func(*config.Config)
@@ -238,18 +239,69 @@ func TestTestIsRateLimitedPerChannel(t *testing.T) {
 	}
 }
 
-// Why: one backup message per run, and it must stay readable when many devices fail.
+// Why (#685): a name alone does not find a device and does not say whether the person must act.
+// One backup message per run lists each failed device with where it is and why it failed, and it
+// must stay readable when many devices fail.
 func TestBackupMessageListsDevicesAndCapsTheList(t *testing.T) {
-	names := make([]string, 13)
-	for i := range names {
-		names[i] = "dev" + string(rune('a'+i))
+	failed := make([]FailedDevice, 13)
+	for i := range failed {
+		n := string(rune('a' + i))
+		failed[i] = FailedDevice{Name: "dev" + n, Hostname: "tasmota-" + n, Address: "192.0.2." + string(rune('1'+i%9)), Reason: "The device did not answer"}
 	}
-	ev := BackupFailed(baseConfig(), 40, names, t0)
-	if ev.Title != "Scheduled backup: 13 of 40 devices failed" || !strings.HasSuffix(ev.Text, "and 3 more") || strings.Contains(ev.Text, "devk") {
+	ev := BackupFailed(baseConfig(), 40, failed, t0)
+	if ev.Title != "Scheduled backup: 13 of 40 devices failed" || !strings.HasSuffix(ev.Text, "\nand 3 more") || strings.Contains(ev.Text, "devk") {
 		t.Fatalf("event = %+v", ev)
+	}
+	lines := strings.Split(ev.Text, "\n")
+	if len(lines) != 12 || lines[0] != "Failed:" || lines[1] != "- deva (tasmota-a, 192.0.2.1): The device did not answer" {
+		t.Errorf("text = %q, want a header, 10 device lines and the rest counted", ev.Text)
+	}
+	if ev.URL != "http://tasmofleet.local/devices/backups?filter=failed" || ev.Path != "/devices/backups?filter=failed" {
+		t.Errorf("link %q, path %q: the message must open the failed devices, not the whole fleet", ev.URL, ev.Path)
 	}
 	if got := Link(config.Config{}, "/x"); got != "" {
 		t.Errorf("link without PUBLIC_URL = %q, want empty", got)
+	}
+}
+
+// Why (#685): a line says what the person can use. An empty hostname, or one that repeats the
+// address or the name, is noise; a device without a reason still gets its line.
+func TestBackupMessageLeavesOutRedundantParts(t *testing.T) {
+	ev := BackupFailed(baseConfig(), 5, []FailedDevice{
+		{Name: "a", Hostname: "a-host", Address: "192.0.2.1", Reason: "r1"},
+		{Name: "b", Address: "192.0.2.2", Reason: "r2"},
+		{Name: "c", Hostname: "192.0.2.3", Address: "192.0.2.3", Reason: "r3"},
+		{Name: "d", Hostname: "d", Address: "192.0.2.4:8080", Reason: "r4"},
+		{Name: "e", Hostname: "e-host", Address: "192.0.2.5"},
+	}, t0)
+	want := "Failed:\n- a (a-host, 192.0.2.1): r1\n- b (192.0.2.2): r2\n- c (192.0.2.3): r3\n- d (192.0.2.4:8080): r4\n- e (e-host, 192.0.2.5)"
+	if ev.Text != want {
+		t.Errorf("text =\n%s\nwant\n%s", ev.Text, want)
+	}
+}
+
+// Why (#685): every channel carries the same words. The ntfy headline stays the one-line title
+// (a line break in a header makes the request fail); the lines go in the body.
+func TestBackupMessageIsTheSameOnEveryChannel(t *testing.T) {
+	ev := BackupFailed(baseConfig(), 2, []FailedDevice{{Name: "a", Hostname: "a-host", Address: "192.0.2.1", Reason: "The device did not answer"}}, t0)
+	r := ntfyRequest(ev)
+	var title string
+	for _, h := range r.headers {
+		if h[0] == "Title" {
+			title = h[1]
+		}
+	}
+	if title != "Scheduled backup: 1 of 2 devices failed" || string(r.body) != ev.Text {
+		t.Errorf("ntfy title %q body %q", title, r.body)
+	}
+	if g := gotifyRequest(ev); !strings.Contains(string(g.body), "192.0.2.1") || !strings.Contains(string(g.body), "The device did not answer") {
+		t.Errorf("gotify body %s", g.body)
+	}
+	if j := WebhookJSON(ev, false); !strings.Contains(j, "192.0.2.1") || !strings.Contains(j, "The device did not answer") {
+		t.Errorf("webhook json %s", j)
+	}
+	if m := string(buildMessage(&mail.Address{Address: "tf@example.test"}, []*mail.Address{{Address: "me@example.test"}}, ev)); !strings.Contains(m, "192.0.2.1") {
+		t.Errorf("mail has no address: %s", m)
 	}
 }
 
@@ -295,18 +347,18 @@ func TestBrowserHookGetsSelectedEventsOnceWithoutAnyChannel(t *testing.T) {
 	o := Options{Config: func() config.Config { return c }, Now: func() time.Time { return t0 }, Browser: func(ev Event) { got = append(got, ev) }}
 	o.Log = slog.New(slog.NewTextHandler(io.Discard, nil))
 	d := New(o)
-	d.Emit(UpdateFinished(c, 1, 5, 0, 0, "1", t0))             // ok, the person wants problems only
-	d.Emit(UpdateFinished(c, 2, 4, 1, 0, "1", t0))             // partial
-	d.Emit(BackupFailed(c, 3, []string{"a"}, t0))              // on
-	d.Emit(SnapshotFailed(c, "disk full", t0))                 // switched off
-	if _, err := d.Test(t.Context(), Webhook, c); err != nil { // no URL: fails, but must not reach the browser
+	d.Emit(UpdateFinished(c, 1, 5, 0, 0, "1", t0))              // ok, the person wants problems only
+	d.Emit(UpdateFinished(c, 2, 4, 1, 0, "1", t0))              // partial
+	d.Emit(BackupFailed(c, 3, []FailedDevice{{Name: "a"}}, t0)) // on
+	d.Emit(SnapshotFailed(c, "disk full", t0))                  // switched off
+	if _, err := d.Test(t.Context(), Webhook, c); err != nil {  // no URL: fails, but must not reach the browser
 		t.Fatal(err)
 	}
 	d.Wait()
 	if len(got) != 2 || got[0].Name != EventUpdateFinished || got[1].Name != EventBackupFailed {
 		t.Fatalf("browser hook got %+v, want the partial update and the backup failure", got)
 	}
-	if got[0].Path != "/transactions/2" || got[1].Path != "/devices" {
+	if got[0].Path != "/transactions/2" || got[1].Path != "/devices/backups?filter=failed" {
 		t.Errorf("paths = %q, %q: a click on the notification must open the page the message links to", got[0].Path, got[1].Path)
 	}
 }

@@ -173,15 +173,15 @@ func TestBrowserNoticesReachTheHubWithUniqueIDs(t *testing.T) {
 	ch, cancel := svc.Hub.Subscribe(events.TopicNotice)
 	defer cancel()
 	cfg := a.notifier.Config()
-	a.notifier.Emit(notify.BackupFailed(cfg, 3, []string{"a"}, time.Now()))
-	a.notifier.Emit(notify.BackupFailed(cfg, 3, []string{"a"}, time.Now()))
+	a.notifier.Emit(notify.BackupFailed(cfg, 3, []notify.FailedDevice{{Name: "a"}}, time.Now()))
+	a.notifier.Emit(notify.BackupFailed(cfg, 3, []notify.FailedDevice{{Name: "a"}}, time.Now()))
 	a.notifier.Emit(notify.SnapshotFailed(cfg, "disk full", time.Now())) // switched off
 	var ids []string
 	for range 2 {
 		select {
 		case ev := <-ch:
 			n, ok := ev.Payload.(events.Notice)
-			if !ok || n.Name != notify.EventBackupFailed || n.Path != "/devices" {
+			if !ok || n.Name != notify.EventBackupFailed || n.Path != "/devices/backups?filter=failed" {
 				t.Fatalf("notice = %+v", ev.Payload)
 			}
 			ids = append(ids, n.ID)

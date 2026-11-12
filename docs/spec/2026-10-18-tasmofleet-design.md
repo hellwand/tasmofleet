@@ -1601,7 +1601,7 @@ never raise a notification. The rule:
 (that is an answer: the device is there and needs the person); `SetLastSeen` keeps the stored value for
 a zero time, so "never answered" stays true for a device that was only judged offline.
 
-The run takes the device guard (owner `backup`) for each device while it backs it up. The notification lists the failed devices only. The run record is pruned with `AUDIT_RETENTION`; a
+The run takes the device guard (owner `backup`) for each device while it backs it up. The notification lists the failed devices only, one line each with its address and the reason the history shows (#685). The run record is pruned with `AUDIT_RETENTION`; a
 device's item keeps its name when the device is deleted. Model: `model.BackupRun`, `BackupRunItem`,
 `BackupOutcome`, `BackupDeviceRow`; the web layer reads them through `web.BackupFleet` (`LastRun`,
 `Overview`, `PruneNext`, `LastMissed`; `Overview` does no device I/O).
@@ -1828,8 +1828,8 @@ hint and Run now.
 
 Package `notify` tells a person about events they did not watch (#249). Events: `update.finished`
 (one per update transaction, sent by the job callback when the last job of the transaction ends; result
-`ok`, `partial`, `failed` or `cancelled`), `backup.scheduled_failed` (one per scheduled run, naming
-the failed devices), `snapshot.failed` (scheduled database snapshot), and `test`. Settings
+`ok`, `partial`, `failed` or `cancelled`), `backup.scheduled_failed` (one per scheduled run, one line
+per failed device with hostname, address and reason, linking to the failed rows of the Backups page), `snapshot.failed` (scheduled database snapshot), and `test`. Settings
 (`NOTIFY_*`, Settings page, tab Notifications) select the events and configure two server-side channels, plus the browser (below):
 
 - **Webhook:** POST to the address as typed, in one of four formats (`NOTIFY_WEBHOOK_FORMAT`, #469):
