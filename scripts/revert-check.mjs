@@ -140,7 +140,12 @@ export function optOut(pr) {
       source: `label "${OPT_OUT_LABEL}"`,
       reason: "set by the maintainer",
     };
-  const body = (pr.body ?? "").replace(/<!--[\s\S]*?-->/g, "");
+  let body = pr.body ?? "";
+  // until stable: stripping "<!<!-- x -->--" leaves a new "<!--" behind, which must not survive (#730)
+  for (let prev = ""; prev !== body; ) {
+    prev = body;
+    body = body.replace(/<!--[\s\S]*?-->/g, "");
+  }
   const m =
     /^[ \t]*revert-check:[ \t]*skip\b[ \t]*[-:,(]*[ \t]*(.*?)[ \t]*\)?[ \t]*$/im.exec(
       body,
