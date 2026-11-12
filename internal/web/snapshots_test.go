@@ -300,6 +300,41 @@ func TestSnapshotsPageShowsDownloadStoredScheduleAndRestore(t *testing.T) {
 	}
 }
 
+// Why (#683): a snapshot's file name carries its time in UTC (the trailing Z) so names stay unique and
+// in order across the summer-time switch, while the app shows the same instant on the viewer's clock.
+// Someone comparing the list with the files on disk saw 09:00 next to a -0800Z name and could not tell
+// which was wrong. The stored list therefore says the names are UTC and gives a worked example, and the
+// example must itself be a valid name, or the sentence would teach a format the app does not write.
+func TestStoredSnapshotsCardSaysFileNamesAreUTC(t *testing.T) {
+	s := snapSetup(t, true)
+	if _, err := s.mgr.Run(t.Context(), 7); err != nil {
+		t.Fatal(err)
+	}
+	for _, withFiles := range []bool{true, false} {
+		if !withFiles {
+			files, err := s.mgr.List()
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, f := range files {
+				if err := s.mgr.Delete(f.Name); err != nil {
+					t.Fatal(err)
+				}
+			}
+		}
+		_, body := s.do(t, "GET", "/settings/system/snapshots", "admin", nil)
+		card := cardOf(t, body, "stored")
+		for _, want := range []string{"File names are in UTC", "tasmofleet-20261106-0800Z.db", "09:00 in Central European Time", "browser&#39;s clock"} {
+			if !strings.Contains(card, want) && !strings.Contains(card, strings.ReplaceAll(want, "&#39;", "'")) {
+				t.Errorf("stored snapshots card (files listed: %v) lacks %q: %s", withFiles, want, card)
+			}
+		}
+	}
+	if !snapshot.ValidName("tasmofleet-20261106-0800Z.db") {
+		t.Error("the example file name in the note is not a name the app writes")
+	}
+}
+
 // Why (#410, maintainer decision; #409 mockup): "Backups of deleted devices" sits in the narrow column
 // under the schedule, below the storage totals; the wide column holds the last run and the device table.
 func TestDeletedDeviceBackupsSitUnderTheDeviceBackupSchedule(t *testing.T) {

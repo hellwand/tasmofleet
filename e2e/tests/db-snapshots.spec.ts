@@ -88,6 +88,9 @@ test("schedule: tick the days and a time, a snapshot appears at that time, it ca
   await expect(page.locator("input[name='v.SNAPSHOT_DAYS'][value='mon']")).not.toBeChecked();
   await expect(page.locator("input[name='v.SNAPSHOT_TIME']")).toHaveValue("03:00");
   await expect(page.locator("#card-snapshots")).toContainText("Times are on the server's clock");
+  // Why (#683): the file names are UTC while the list is on the viewer's clock; the card must say so.
+  await expect(page.locator("#card-stored")).toContainText("File names are in UTC");
+  await expect(page.locator("#card-stored")).toContainText("tasmofleet-20261106-0800Z.db was taken at 09:00 in Central European Time");
 
   await scheduleSnapshotSoon(page, app.url);
   await expect(page.locator("#card-snapshots")).toContainText("Next run");
@@ -99,6 +102,10 @@ test("schedule: tick the days and a time, a snapshot appears at that time, it ca
   }).toPass({ timeout: 120_000 });
   await expect(page.locator("#card-snapshots")).toContainText("Last snapshot");
   await expect(page.locator("#card-stored .sys-orphan")).toContainText("Latest");
+  // The note's rule holds for the real file: the stamp in the name is the listed instant in UTC.
+  const name = (await page.locator("#card-stored .sys-orphan .sys-store-name").innerText()).trim();
+  const at = await page.locator("#card-stored .sys-orphan time").getAttribute("datetime");
+  expect(name).toBe("tasmofleet-" + new Date(at!).toISOString().slice(0, 16).replace(/[-:]/g, "").replace("T", "-") + "Z.db");
 
   // A stored snapshot is as secret as a fresh one: this session has not confirmed yet.
   await page.locator("#card-stored .sys-orphan").getByRole("link", { name: "Download" }).click();
