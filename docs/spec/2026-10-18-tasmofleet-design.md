@@ -1162,8 +1162,8 @@ Submit.
 
 | State       | Rule                                                                                                                                                               |
 | ----------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| online      | MQTT device: LWT `Online` and any message within `StaleAfter`, or LWT `Offline` while the background poll reaches it (#619). HTTP-only device: last poll succeeded |
-| stale       | MQTT device: LWT `Online` but silent longer than `StaleAfter` (default 2 x TelePeriod + 60 s = 660 s). Triggers an HTTP poll                                       |
+| online      | MQTT device: LWT `Online` and any message within `StaleAfter` or a background poll that reached it within one `POLL_INTERVAL` (+20 %) with no failed poll since (#669), or LWT `Offline` while the background poll reaches it (#619). HTTP-only device: last poll succeeded |
+| stale       | MQTT device: LWT `Online` but silent longer than `StaleAfter` (default 2 x TelePeriod + 60 s = 660 s) and no background poll reached it within one `POLL_INTERVAL` (+20 %) either (#669). Triggers an HTTP poll |
 | offline     | LWT `Offline` while the background poll does not reach the device, or `OfflineAfter` (3) consecutive failed polls                                                  |
 | auth_failed | the device answers but refuses our credentials (401 / `WARNING Need user=`). Never counted as online (TasmoAdmin lesson B7)                                        |
 | unknown     | nothing observed since start                                                                                                                                       |
@@ -1173,7 +1173,13 @@ Submit.
 - Poll scheduling: HTTP-only devices every `POLL_INTERVAL` (5 min) with ±20 % jitter. MQTT
   devices only while their telemetry is silent (nothing within `StaleAfter`), and then like an HTTP-only
   device: an HTTP answer or a refused API keeps such a device online but does not stop its polls (#652),
-  so it stays online while `POLL_INTERVAL` (+20 %) is shorter than `StaleAfter`. A device whose last will
+  and what the background poll reaches (an answer or a refused API, the snapshot read included, never a probe) keeps
+  it fresh for `max(StaleAfter, POLL_INTERVAL + 20 %)` plus 35 s (one tick and the poll timeout), until its next poll
+  is due, so it stays online at every `POLL_INTERVAL` (#669). That holds whatever MQTT sent since, as for an HTTP-only
+  device: a device whose telemetry stops without its will firing stays online until its next poll. The first
+  background poll that does not reach it ends that until a background poll reaches it again: from then on only
+  `StaleAfter` since its last contact counts, and an MQTT message or a probe does not bring the window back. MQTT
+  contact alone keeps `StaleAfter`, and the poll rate does not change. A device whose last will
   is `Offline` is polled like an HTTP-only device too (#619): the retained will outlives a device that left
   our broker unclean (a power cut while switching broker, a restored config for another broker) or has MQTT
   switched off. A new will (one that follows `Online`) makes the device offline at once and is checked one
@@ -1205,7 +1211,7 @@ Submit.
   next background poll, whose answer or refusal makes it online (#619): with MQTT off as well, a device whose
   API is off is online and has no path. `Health.APIOff()` is the one rule for tile, card, list and gates. A
   refused poll waits like a failing one (up to 30 min, or `POLL_INTERVAL` when that is longer), except for a device on our
-  broker whose telemetry is silent: its refusals are what keeps it online, so it is asked at the normal interval (#652). For a device whose last will is `Offline`, only its own MQTT
+  broker whose last will is not `Offline`: once its telemetry is silent its refusals are what keeps it online, so its next poll is due at the normal interval (#652), after a refused snapshot read too (#669; the snapshot read itself is not repeated before the back-off). For a device whose last will is `Offline`, only its own MQTT
   messages and what the background poll reaches (an answer or a refusal) count as `LastSeen`: a probe contact
   does not move "Offline since". An online device whose API is off
   and which no MQTT path can serve has no path for backup, update, restore and changes: scheduled backups skip it
