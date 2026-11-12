@@ -4,6 +4,31 @@ All notable changes. Breaking changes are marked **breaking**. tasmofleet has no
 compatibility shims (see CLAUDE.md), so read this before upgrading. Database migrations
 always upgrade automatically.
 
+## 0.34.2 "Split Rock" (2026-11-12)
+
+### Added
+
+- docs/pitfalls.md: one rule per mistake that already happened, with where it is enforced (#525)
+
+### Changed
+
+- CLAUDE.md is a short router with the enforcing command per rule; the details moved to docs/dev, and `make agent-refs` fails when they name something that does (#526)
+- Changelog lines are added as fragment files in `changes/unreleased/` instead of edits to `CHANGELOG.md`, so parallel pull requests no longer conflict there; the release commit assembles them with `make changelog-assemble` (#527)
+- A second ruleset on `main`, "main: CI must be green (no bypass)", holds the status check `required` without an admin bypass, so nothing reaches `main` before `required` is green on that commit (#709)
+
+### Fixed
+
+- Settings: the tab could not be read on a device that is online on TasmoFleet's broker but does not answer over HTTP ("The device did not answer in time."); the MQTT user was asked over HTTP first, and that timeout discarded the whole read. A bare `MqttUser` is now read like every other value, MQTT first; in the console it stays admin-only and its reply masked (#702, thanks @Noschvie)
+- Settings, Sign-in: "Test discovery" showed the whole settings page inside the Identity provider card; it now answers with its own result line only, like the other test buttons (#705, thanks @Noschvie)
+- The Authentik guide printed the sign-in variables without the `TASMOFLEET_` prefix for the container configuration, where a name without the prefix is ignored without a message (the short names are valid only in `/data/tasmofleet.env`); it now uses the prefixed names, says that issuer and client secret must be set in the same place and that a setting comes from the page or from the container configuration, names the "Sign-in" tab, and marks the application icon as an optional Authentik-side step that tasmofleet neither sends nor reads (#706, thanks @Noschvie)
+- Settings, Sign-in: the help under Issuer URL no longer says the issuer needs a trailing slash (that is Authentik's form); it must be exactly the issuer the identity provider publishes (#718)
+- Settings: every hint that names a container variable now shows the `TASMOFLEET_` name, which is the only form the container environment reads (a short name there is ignored without a message): the help of locked fields, "Needs TASMOFLEET_PUBLIC_URL", the save error, the confirmation banner and the "Set by the container" card (#719, thanks @Noschvie)
+- Sign-in: with only the client secret in the environment, the start log now has one warning that `TASMOFLEET_OIDC_ISSUER` is missing because the secret locked it, and the Sign-in tab says so instead of "set by the environment"; the same for an issuer from the environment, which locks the client secret. `docs/configuration.md` states that both are set as variables or neither (#720, thanks @Noschvie)
+
+### Security
+
+- Docker Hub credentials are read only through the `dockerhub` deployment environment (policy: `main` and `v*` tags); pull requests and other branches never receive them, and missing credentials on `main` or a release tag now fail the job instead of silently skipping Docker Hub (#693)
+
 ## 0.34.1 "Split Rock" (2026-11-06)
 
 ### Upgrade notes
