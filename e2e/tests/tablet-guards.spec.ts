@@ -76,3 +76,61 @@ for (const width of [768, 1024]) {
     });
   }
 }
+
+// #727: a live reload of /devices/table (the page does one right after it connects and again after
+// device events) replaces the whole table. The swapped-in table has no <colgroup> fit yet; tables.js
+// used to fit it only when htmx settled (about 20 ms later), and until then the Power column
+// overlapped the Actions summary in every row at 1024 px. A person sees that frame, and the nightly
+// layout guard caught it by chance (a run that measured inside the window). So the table must be fitted
+// in the very task that swaps it in: nothing is painted between the swap and the end of that task.
+// The probe reads the layout in a microtask of the swap's own task, with no fixed wait.
+const powerOverActions = () => {
+  const offenders: string[] = [];
+  const rows = [...document.querySelectorAll('table[data-table="devices"] tbody tr')].filter((r) => (r as HTMLElement).offsetParent !== null);
+  for (const tr of rows) {
+    const power = tr.querySelector('td[data-label="Power"]');
+    const actions = tr.querySelector('td[data-label="Actions"]');
+    if (!power || !actions) continue;
+    // the controls that must stay clear of each other: the Power buttons and the Actions summary
+    const a = [...power.querySelectorAll("button")].map((e) => e.getBoundingClientRect());
+    const b = [...actions.querySelectorAll("summary")].map((e) => e.getBoundingClientRect());
+    for (const x of a)
+      for (const y of b) {
+        const w = Math.min(x.right, y.right) - Math.max(x.left, y.left);
+        const h = Math.min(x.bottom, y.bottom) - Math.max(x.top, y.top);
+        if (w > 1 && h > 1) offenders.push(`${tr.querySelector("td a")?.textContent?.trim() ?? "row"}: ${Math.round(w)}x${Math.round(h)}`);
+      }
+  }
+  return { rows: rows.length, offenders: [...new Set(offenders)] };
+};
+
+test("devices list at 1024px: the table is fitted in the task that swaps it in after a live reload", async ({ page }) => {
+  await page.setExtraHTTPHeaders(adam);
+  await page.setViewportSize({ width: 1024, height: 900 });
+  await page.emulateMedia({ colorScheme: "light" });
+  await page.goto(app.url + "/devices");
+  await settled(page);
+  await expect(page.locator('table[data-table="devices"] tbody tr').first()).toBeVisible();
+  // the probe itself: on a list that has settled nothing overlaps (else it would flag the fit, not the window)
+  await expect.poll(async () => (await page.evaluate(powerOverActions)).offenders, { timeout: 15_000 }).toEqual([]);
+
+  // install the probe once; the swap handler below calls it
+  await page.evaluate(`window.__powerOverActions = ${powerOverActions.toString()}`);
+  const swapped = await page.evaluate(
+    () =>
+      new Promise<{ rows: number; offenders: string[] }>((resolve) => {
+        // live cells swap all the time too: only the swap of the whole list counts
+        const onSwap = (e: Event) => {
+          if ((e.target as Element).id !== "devtable") return;
+          document.removeEventListener("htmx:afterSwap", onSwap);
+          // registered after tables.js's own listener, so this sees what that listener left behind
+          queueMicrotask(() => resolve((window as any).__powerOverActions()));
+        };
+        document.addEventListener("htmx:afterSwap", onSwap);
+        const t = document.getElementById("devtable")!;
+        (window as any).htmx.ajax("GET", t.getAttribute("hx-get")!, { target: t, swap: "innerHTML" });
+      }),
+  );
+  expect(swapped.rows, "the reloaded list has rows").toBeGreaterThan(10);
+  expect(swapped.offenders, "Power buttons overlapping the Actions summary right after the swap").toEqual([]);
+});

@@ -712,6 +712,7 @@
       return;
     }
     var requested = (e.detail.xhr && started.get(e.detail.xhr)) || 0;
+    var laidOut = [];
     t.querySelectorAll("table[data-table][data-cols]").forEach(
       function (table) {
         var key = keyOf(table),
@@ -734,10 +735,27 @@
           return;
         }
         write(table, rec.snap.hidden, rec.snap.weight);
+        laidOut.push(table);
       },
     );
+    // A whole table that was swapped in has no pinned-column fit yet. htmx settles ~20 ms after the
+    // swap, enhance() fits it then, and until then the browser can paint it: the sticky Power column
+    // sat on the Actions summary in every row (#727). Fit it in the swap's own task, before any
+    // paint, and only the tables this swap brought (a live cell holds none, so it costs a query).
+    t.querySelectorAll("table[data-table][data-cols]").forEach(function (table) {
+      if (laidOut.indexOf(table) < 0) {
+        fitSwapped(table);
+      }
+    });
     restoreHandleFocus();
   });
+  function fitSwapped(table) {
+    fitPinned(table);
+    stick(table);
+    mirror(table);
+    refreshHandles(table);
+    refreshDrag(table);
+  }
   // The new table has no handles until refreshHandles runs, and until then the focus sits on
   // the page: arrow keys in that gap would go nowhere. So the handles are made and the focus
   // is put back as soon as the content is in (afterSwap), and again once it has settled.

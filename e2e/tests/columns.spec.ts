@@ -316,12 +316,11 @@ test("a list update during keyboard resizing keeps the new width and the focused
   await page.setExtraHTTPHeaders(adam);
   await page.goto(app.url + "/devices");
   await resetAll(page, "/devices", "table.devices");
-  const th = page.locator('table[data-table="devices"] thead th', { hasText: "Status" });
   const handle = page.getByRole("separator", { name: "Resize column Status" });
   await handle.focus();
-  const w0 = (await th.boundingBox())!.width;
+  const w0 = await width(page, "devices", "Status");
   for (let i = 0; i < 5; i++) await page.keyboard.press("ArrowLeft");
-  const w1 = (await th.boundingBox())!.width;
+  const w1 = await width(page, "devices", "Status");
   expect(w1).toBeLessThan(w0 - 20);
 
   // the update arrives inside the save debounce: the server still has the old layout
@@ -332,11 +331,11 @@ test("a list update during keyboard resizing keeps the new width and the focused
     (window as any).htmx.ajax("GET", t.getAttribute("hx-get")!, { target: t, swap: "innerHTML" });
   });
   await reloaded;
-  await expect.poll(async () => Math.abs((await th.boundingBox())!.width - w1)).toBeLessThan(1.5);
+  await expect.poll(async () => Math.abs((await width(page, "devices", "Status")) - w1)).toBeLessThan(1.5);
   await expect(page.getByRole("separator", { name: "Resize column Status" })).toBeFocused();
 
   for (let i = 0; i < 5; i++) await page.keyboard.press("ArrowLeft");
-  expect((await th.boundingBox())!.width).toBeLessThan(w1 - 20);
+  expect(await width(page, "devices", "Status")).toBeLessThan(w1 - 20);
   await resetAll(page, "/devices", "table.devices");
 });
 
@@ -391,7 +390,6 @@ test("a late answer to an older list request does not undo a width saved since",
   await page.setExtraHTTPHeaders(adam);
   await page.goto(app.url + "/devices");
   await resetAll(page, "/devices", "table.devices");
-  const th = page.locator('table[data-table="devices"] thead th', { hasText: "Status" });
   const handle = page.getByRole("separator", { name: "Resize column Status" });
 
   // the first list request is answered with the old layout but delivered only when released
@@ -420,11 +418,11 @@ test("a late answer to an older list request does not undo a width saved since",
   await isHeld;
 
   await handle.focus();
-  const w0 = (await th.boundingBox())!.width;
+  const w0 = await width(page, "devices", "Status");
   const done = saved(page, "table.devices");
   for (let i = 0; i < 5; i++) await page.keyboard.press("ArrowLeft");
   await done;
-  const w1 = (await th.boundingBox())!.width;
+  const w1 = await width(page, "devices", "Status");
   expect(w1).toBeLessThan(w0 - 20);
 
   // a second request leaves after the save; then the old answer lands
@@ -457,10 +455,9 @@ test("a list update before the first arrow key keeps the focused handle", async 
   await page.setExtraHTTPHeaders(adam);
   await page.goto(app.url + "/devices");
   await resetAll(page, "/devices", "table.devices");
-  const th = page.locator('table[data-table="devices"] thead th', { hasText: "Status" });
   const handle = page.getByRole("separator", { name: "Resize column Status" });
   await handle.focus();
-  const w0 = (await th.boundingBox())!.width;
+  const w0 = await width(page, "devices", "Status");
 
   // swap the table and look at the focus in the very task the swap settles in
   const focusedAfterSwap = await page.evaluate(
@@ -474,7 +471,7 @@ test("a list update before the first arrow key keeps the focused handle", async 
   expect(focusedAfterSwap).toBe("Resize column Status");
 
   for (let i = 0; i < 5; i++) await page.keyboard.press("ArrowLeft");
-  expect((await th.boundingBox())!.width).toBeLessThan(w0 - 20);
+  expect(await width(page, "devices", "Status")).toBeLessThan(w0 - 20);
   await resetAll(page, "/devices", "table.devices");
 });
 
