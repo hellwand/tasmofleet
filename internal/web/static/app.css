@@ -406,7 +406,7 @@ hr,
 main {
   max-width: var(--container);
   margin: 0 auto;
-  padding: var(--sp-16) var(--page-pad) 120px;
+  padding: var(--sp-16) var(--page-pad) 0;
 }
 
 /* Page header: title left, at most one primary action right (more → secondary
@@ -6935,8 +6935,9 @@ dialog.stepup {
   font-size: 13px;
   color: var(--color-text-2);
 }
-/* the gallery starts where the prototype's screen ends (main's 120 px bottom padding), so the
-   UI-states screen above it is the prototype's to the pixel and the gallery only adds below */
+/* the gallery starts where the prototype's screen ends (the prototype's 120 px bottom padding of
+   main), so the UI-states screen above it is the prototype's to the pixel and the gallery only
+   adds below */
 .sg-gallery {
   display: flex;
   flex-direction: column;
@@ -8664,13 +8665,14 @@ td.pcell .pwr[aria-pressed="true"] .sw::after {
   bottom: calc(var(--sb-h) + 16px);
   margin: 14px auto 0;
 }
+/* at the end of the scroll the bar rests where it sticks mid-scroll, one gap above the status bar */
 body:has(.dv-list .bulkbar:not([hidden])) {
-  padding-bottom: var(--sb-h);
+  padding-bottom: calc(var(--sb-h) + var(--sp-16));
 }
 @media (max-width: 44.99rem) {
   .dv-list .bulkbar:has(> .bulk-acts) {
     bottom: var(--sb-h);
-    margin: 12px calc(-1 * var(--page-pad, 12px)) -120px;
+    margin: 12px calc(-1 * var(--page-pad, 12px)) 0;
   }
   body:has(.dv-list .bulkbar:not([hidden])) {
     padding-bottom: var(--sb-h);

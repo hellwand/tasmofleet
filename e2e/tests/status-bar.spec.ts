@@ -1,5 +1,7 @@
 import { test, expect } from "../support/fixtures";
+import { designAdmin } from "../support/seed";
 import { App, startApp } from "../support/stack";
+import { startVisualStack, type VisualStack } from "../support/visual-stack";
 
 // #307: the status bar is fixed to the bottom of every page. It never scrolls away, nothing hides
 // behind it, the phone shows one 44 px line that opens into a sheet, and the version it carries
@@ -31,6 +33,54 @@ for (const [width, line] of [[1280, 32], [375, 44]] as const) {
     expect(last).toBeLessThanOrEqual(after.y + 0.5);
   });
 }
+
+// #773: main kept a 120 px bottom padding from before the status bar existed, on top of the room the
+// body reserves for the bar, so every page scrolled ~120 px past its content and ended in an empty
+// strip. The room is the body's alone: at the end of the scroll the content ends one normal gap
+// (--sp-16) above the bar. The Devices list with the 60-device fleet is taller than any window.
+test.describe("the end of a long page", () => {
+  test.describe.configure({ mode: "serial" });
+  let fleet: VisualStack;
+  test.beforeAll(async ({ browser }) => {
+    test.setTimeout(600_000);
+    fleet = await startVisualStack("fleet", browser);
+  });
+  test.afterAll(async () => fleet?.stop());
+
+  for (const [width, height] of [[1280, 800], [375, 700]] as const) {
+    test(`the content ends one gap above the status bar at the end of the scroll (${width}px)`, async ({ page }) => {
+      await page.setViewportSize({ width, height });
+      await page.setExtraHTTPHeaders(designAdmin);
+      await page.goto(fleet.app.url + "/devices");
+      // a phone shows cards, the table is in the page but hidden
+      await page.locator("table[data-table=devices] tbody tr, li.dcard").filter({ visible: true }).first().waitFor();
+      await page.evaluate(() => window.scrollTo(0, document.documentElement.scrollHeight));
+      const m = await page.evaluate(() => {
+        const bar = document.querySelector("footer.sb")!.getBoundingClientRect();
+        // the last thing the page shows in main (not a fixed bar, not something hidden)
+        const shown = [...document.querySelector("main")!.children].filter((c) => {
+          const cs = getComputedStyle(c);
+          return cs.display !== "none" && cs.position !== "fixed" && c.getBoundingClientRect().height > 0;
+        });
+        const probe = document.createElement("div");
+        probe.style.height = "var(--sp-16)";
+        document.body.append(probe);
+        const gap = probe.getBoundingClientRect().height;
+        probe.remove();
+        return {
+          tall: document.documentElement.scrollHeight > innerHeight + 200,
+          reach: Math.round(window.scrollY + innerHeight) >= document.documentElement.scrollHeight - 1,
+          gap,
+          between: bar.top - shown[shown.length - 1].getBoundingClientRect().bottom,
+        };
+      });
+      expect(m.tall, "the page has to be taller than the window for this to mean anything").toBe(true);
+      expect(m.reach, "the scroll reached the end").toBe(true);
+      expect(m.gap).toBe(16);
+      expect(Math.abs(m.between - m.gap), `${m.between}px between the content and the bar, one gap is ${m.gap}px`).toBeLessThanOrEqual(2);
+    });
+  }
+});
 
 test("on a phone the bar is one line that opens into a sheet", { tag: "@core" }, async ({ page }) => {
   await page.setViewportSize({ width: 375, height: 700 });

@@ -128,7 +128,9 @@ prototype's markup in its CSS block; the recurring sizes:
   6, badges 5, pills 999, dots and avatars 50 %.
 - Heights: controls 34 px (40 px on phones), small buttons 32, top bar 52, sub-navigation 40, phone
   header 56, row targets 44.
-- `main` is at most 1640 px wide with `clamp(12px, 2.4cqw, 32px)` gutters and 120 px at the bottom.
+- `main` is at most 1640 px wide with `clamp(12px, 2.4cqw, 32px)` gutters and no bottom padding
+  of its own: the room below the content is the body's (the status bar's height plus `--sp-16`,
+  #773).
 - Shadows: `--shadow-lg` for menus, dialogs and toasts only; `--shadow-knob` for switches.
 
 ## Components
@@ -439,3 +441,5 @@ The structure deviations S1-S7 are listed with their reasons in the plan (sectio
     confirmation, backup view, prune, restore progress and others) are built from the
     components above (page header, card, confirmation card, banner, buttons); they have no
     pixel reference and are checked by their handler tests, e2e specs and the layout guards.
+12. `main` has no 120 px bottom padding (the prototype's, from before the status bar). The body
+    reserves the status bar plus one `--sp-16` gap, so a page ends one gap above the bar (#773).
