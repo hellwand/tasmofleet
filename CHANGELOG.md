@@ -4,6 +4,33 @@ All notable changes. Breaking changes are marked **breaking**. tasmofleet has no
 compatibility shims (see CLAUDE.md), so read this before upgrading. Database migrations
 always upgrade automatically.
 
+## 0.36.0 "Fisgard" (2026-11-13)
+
+### Upgrade notes
+
+- Migration 0048 adds the columns `start_at` and `not_started` to `ota_jobs`, so an update job can wait for a start time; every existing job keeps starting at once. Nothing to do (#603).
+
+### Added
+
+- You can plan an update for later. The update preview has a "5 · When" card: start now (the default) or at a chosen time, with the quick picks Tonight 03:00, Tomorrow night 03:00 and "Like last time", or any other date and time. The time is read in your browser's time zone (in the server's without JavaScript), a time that is not in the future is refused and the button reads "Schedule update"; the audit log records the planned start. The help of the "Send when" notification setting now says that "problems" also sends a scheduled update that was not started (#604)
+- Update jobs can wait for a start time. At the start TasmoFleet checks every device again (the safety guard, the device lock, a firmware update still running, OTA exclusion). If TasmoFleet was down at the start time, the update starts as soon as it is back, but only within 60 minutes; later it is not started at all and a "Scheduled update not started" notification is sent (also with "only problems"). A planned update can be cancelled until it starts (#603)
+- Planned updates show up in Transactions. A "Scheduled" section above the history lists them soonest first with their start, the time left and who planned them, and a Cancel that says nothing on the devices changes. The page of a plan shows its start, what happens if TasmoFleet is down then and its devices as "Planned"; an update that started says how close to its time it started. A plan that TasmoFleet was down for shows "Not started" with the reason and the notification text, a cancelled plan "Cancelled before start", and both offer "Plan again…" (the update preview with the same devices and release) instead of Retry. Until it starts a plan is never shown as queued or running (not in the status bar, the Dashboard or About), the device stays usable, and the device picker, Make compliant and deleting the device name the plan that holds it; a delete is refused before "Delete the backups too" runs. A device that was busy for the whole late-start window, or excluded from updates after planning, now reads "Device was busy" or "Excluded from updates since the plan" instead of "Guard refused" (#604, #326)
+
+### Changed
+
+- The built-in SQLite is now 3.54.1 (was 3.53.4); System, About shows the version.
+
+### Fixed
+
+- Every control a person starts now shows that it runs, and a failed request says what failed: a file chosen for the import, a field and the live rule preview show a ring while they wait (they are never disabled, so the newest value is still sent), a request that got no answer shows a toast naming the control ("Refresh identity was not sent: no connection", "… timed out"), the "Still working" note closes as soon as its request ends, and the links and buttons into the restore, drift and replace pages, which read a device before they answer, show a ring until the page arrives (#634)
+- The Devices list after a live reload: the table is fitted in the same step that the reload swaps it in (the Power column used to lie on the row menu in every row until the page had settled), and resizing a column with the arrow keys while the list refreshed no longer resets the whole table to equal-width columns, because the width is saved from the table that is on the page (#727)
+- The Firmware page no longer shows tooltips of several hundred characters that list every device name, over the device count of a file and over a cached file that many devices use: they name as many devices as fit in 160 characters and say how many more there are (#727)
+- Pages no longer scroll about 120 px past their content: the leftover bottom padding of the page container is gone, so a long page such as Devices ends one normal gap above the status bar, and the device list's selection bar rests one gap above the status bar at the end of the scroll as it does while scrolling (#773)
+
+### Removed
+
+- The old container package `ghcr.io/nofuturekid/tasmofleet` is deleted. It stopped at 0.34.1; pull `ghcr.io/hellwand/tasmofleet` instead. The Docker Hub image `nofuturekid/tasmofleet` is not affected (#738)
+
 ## 0.35.0 "Bishop Rock" (2026-11-13)
 
 ### Upgrade notes
