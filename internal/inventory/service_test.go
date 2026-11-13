@@ -257,6 +257,26 @@ func TestNoNetworksMeansNoIPAddresses(t *testing.T) {
 	}
 }
 
+// A stored device name or hostname ends up in single-line messages (the failed-backup
+// notification lists one device per line) and in the pages. U+2028 and U+2029 are not control
+// characters (Unicode Zl and Zp), but a receiver that renders them breaks the line, so a device
+// could forge a second line. CleanName must drop them like it drops "\n"; ordinary spaces and
+// non-Latin letters are names people use and stay.
+func TestCleanNameDropsLineAndParagraphSeparators(t *testing.T) {
+	for _, c := range []struct{ name, in, want string }{
+		{"line separator", "boiler\u2028- Lamp (192.0.2.8)", "boiler- Lamp (192.0.2.8)"},
+		{"paragraph separator", "boiler\u2029- Lamp (192.0.2.8)", "boiler- Lamp (192.0.2.8)"},
+		{"both in one name", "a\u2028b\u2029c", "abc"},
+		{"newline still dropped", "a\nb", "ab"},
+		{"ordinary space stays", "living room", "living room"},
+		{"non-Latin letters stay", "Küche Bügel 台所", "Küche Bügel 台所"},
+	} {
+		if got := CleanName(c.in); got != c.want {
+			t.Errorf("%s: CleanName(%q) = %q, want %q", c.name, c.in, got, c.want)
+		}
+	}
+}
+
 // Identity is the MAC: every spelling must collapse to one stored form or the
 // unique index and the MQTT discovery matching would see two devices.
 func TestNormaliseMAC(t *testing.T) {

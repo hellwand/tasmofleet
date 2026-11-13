@@ -711,6 +711,8 @@ func TestScheduledBackupNotificationHasOneLinePerFailedDeviceWhateverTheRowHolds
 	for i, d := range []model.Device{
 		{Name: "porty", Address: "192.0.2.1", Net: model.NetFacts{Hostname: forged}},
 		{Name: "bad\r\n- Lamp (192.0.2.8): The device did not answer", Address: "192.0.2.2", Net: model.NetFacts{Hostname: strings.Repeat("h", 500)}},
+		// U+2028 is no control character (Unicode Zl) but a receiver can render it as a line break
+		{Name: "sep", Address: "192.0.2.3", Net: model.NetFacts{Hostname: "y\u2028- Fan (192.0.2.7): The device did not answer"}},
 	} {
 		id, err := e.st.CreateDevice(context.Background(), d)
 		if err != nil {
@@ -724,12 +726,15 @@ func TestScheduledBackupNotificationHasOneLinePerFailedDeviceWhateverTheRowHolds
 		e.fail[d.Name] = tasmota.ErrTimeout
 	}
 	e.b.Run(context.Background())
-	if len(e.notes) != 1 || len(e.notes[0]) != 2 {
+	if len(e.notes) != 1 || len(e.notes[0]) != 3 {
 		t.Fatalf("notifications = %+v", e.notes)
 	}
-	text := notify.BackupFailed(config.Config{}, 2, e.notes[0], fleetT0).Text
-	if lines := strings.Split(text, "\n"); len(lines) != 3 { // "Failed:" and one line per device
-		t.Fatalf("message has %d lines, want 3:\n%s", len(lines), text)
+	text := notify.BackupFailed(config.Config{}, 3, e.notes[0], fleetT0).Text
+	if lines := strings.Split(text, "\n"); len(lines) != 4 { // "Failed:" and one line per device
+		t.Fatalf("message has %d lines, want 4:\n%s", len(lines), text)
+	}
+	if strings.ContainsAny(text, "\u2028\u2029") {
+		t.Errorf("message keeps a line or paragraph separator: %q", text)
 	}
 	for _, f := range e.notes[0] {
 		if len([]rune(f.Hostname)) > 100 || len([]rune(f.Name)) > 100 {

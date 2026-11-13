@@ -176,10 +176,12 @@ func ValidTopic(t string) bool {
 }
 
 // CleanName makes a device-supplied name storable: control and invisible characters (bidi
-// overrides, zero-width) are dropped, the rest trimmed and cut to the name limit. It may be empty.
+// overrides, zero-width) and the Unicode line and paragraph separators (U+2028, U+2029: not
+// control characters, but a receiver can render them as a line break) are dropped, the rest
+// trimmed and cut to the name limit. It may be empty.
 func CleanName(s string) string {
 	s = strings.TrimSpace(strings.Map(func(r rune) rune {
-		if unicode.IsControl(r) || unicode.Is(unicode.Cf, r) {
+		if unicode.IsControl(r) || unicode.In(r, unicode.Cf, unicode.Zl, unicode.Zp) {
 			return -1
 		}
 		return r
