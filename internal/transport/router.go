@@ -354,7 +354,7 @@ func (r *Router) Command(ctx context.Context, t tasmota.Target, cmnd string) (js
 // one call. An answer we cannot use (ErrBadResponse, a device error) is an answer and is returned.
 func (r *Router) read(ctx context.Context, t tasmota.Target, cmnd string, cls cmdClass) (json.RawMessage, error) {
 	id := t.DeviceID()
-	if mqttCannotMatch(cmnd) {
+	if MQTTCannotMatch(cmnd) {
 		return r.httpFirst(ctx, t, cmnd, cls)
 	}
 	d, err := r.o.Devices.GetDevice(ctx, id)
@@ -392,10 +392,11 @@ func (r *Router) read(ctx context.Context, t tasmota.Target, cmnd string, cls cm
 	return raw, err
 }
 
-// mqttCannotMatch reports reads whose replies the command channel does not match (State answers with
+// MQTTCannotMatch reports reads whose replies the command channel does not match (State answers with
 // its own keys, a bare Gpio only when GPIO1 is set, Gpios and Modules in several parts): they would
-// time out over MQTT and wrongly mark the device, so they stay HTTP first.
-func mqttCannotMatch(cmnd string) bool {
+// time out over MQTT and wrongly mark the device, so they stay HTTP first. A caller that pins MQTT
+// leaves them out (the data refresh, #676).
+func MQTTCannotMatch(cmnd string) bool {
 	name, args, _ := strings.Cut(strings.TrimSpace(cmnd), " ")
 	switch strings.ToLower(name) {
 	case "state", "gpios", "modules":

@@ -49,6 +49,10 @@ import (
 // retried before), so about once an hour. The policy values are left out of the data read while the policy
 // live check is paused or its interval is 0, as for the policy poller.
 //
+// A device whose HTTP API is off (or HTTP blocked) is never "readable" (the HTTP health poll does not reach it), yet MQTT
+// serves it: when its data is due and the router reads it over MQTT, it is visited for the data alone (#676), without
+// the broker read and the identity probe, which are HTTP and wait for HTTP.
+//
 // One device at a time on the whole process, and only while nobody else works on the device: the
 // read takes the device lock like any writer and is skipped while a job holds the device or a firmware
 // update typed in the console is still flashing it (backupGuard, as for a scheduled backup).
@@ -119,6 +123,10 @@ type brokerHostReader struct {
 	// readData fills the caches of the Settings tab, the policy values and the GPIO templates from the
 	// device; nil: not done. It runs without the device lock (see above).
 	readData func(context.Context, model.Device) error
+	// readsOverMQTT says whether the reads of the data part go over MQTT for d (the router's choice,
+	// transport.Choose: Commands is MQTT); nil: never. Only then is a device whose HTTP API is off visited for
+	// its data alone (#676).
+	readsOverMQTT func(context.Context, model.Device) bool
 
 	kick        chan model.DeviceID
 	kickRestart chan model.DeviceID
@@ -272,7 +280,10 @@ func (r *brokerHostReader) pass(ctx context.Context) {
 		}
 		if !r.readable(d) {
 			ask(d)
-			continue
+			if !r.dataOverMQTT(ctx, d, what) {
+				continue
+			}
+			what = visitWhat{data: true} // the broker and the identity are HTTP reads and wait for HTTP
 		}
 		err := r.visit(ctx, d, what)
 		if err == nil && r.restartLeft[d.ID] && (what.identity || what.data) {
@@ -309,6 +320,17 @@ func (r *brokerHostReader) requested(id model.DeviceID, w brokerWant, now time.T
 // safeboot answer Unknown (#558; the list gives the effective variant).
 func (r *brokerHostReader) readable(d model.Device) bool {
 	return !policy.LimitedFirmware(d.Identity.Variant) && r.httpUp(d.ID)
+}
+
+// dataOverMQTT says whether d, which readable refuses for the HTTP reason only (regular firmware, the HTTP
+// health poll has not reached it: its API is off, or HTTP is blocked), is visited for its data alone now: the data
+// is due and its reads go over MQTT (#676). Such a device never got its data refreshed otherwise, because an API
+// refusal never moves the HTTP fact readable asks for. The data read holds no lock (readDataOf), so readable's
+// reason for waiting for HTTP does not apply to it; the broker read stays HTTP and keeps its gate.
+// A device stored without a MAC is not visited: its refresh has no MQTT check to pin the reads to (refreshData), so
+// they would go over HTTP.
+func (r *brokerHostReader) dataOverMQTT(ctx context.Context, d model.Device, what visitWhat) bool {
+	return what.data && r.readData != nil && r.readsOverMQTT != nil && d.MAC != "" && !policy.LimitedFirmware(d.Identity.Variant) && r.readsOverMQTT(ctx, d)
 }
 
 var (
@@ -483,6 +505,17 @@ func (a *runtime) startBrokerHost(ctx context.Context) {
 func (a *runtime) wireDeviceRefresh(r *brokerHostReader) {
 	r.readIdentity = a.svc.Prober.RefreshFacts
 	r.readData = a.refreshData
+	r.readsOverMQTT = a.readsOverMQTT
+}
+
+// readsOverMQTT says whether the router reads d over MQTT: transport.Choose over the device's facts, the same
+// decision the router acts on. False when the facts cannot be read.
+func (a *runtime) readsOverMQTT(ctx context.Context, d model.Device) bool {
+	if a.facts == nil { // MQTT is off
+		return false
+	}
+	f, err := a.facts.Facts(ctx, d.ID)
+	return err == nil && transport.Choose(f).Commands == transport.MQTT
 }
 
 // refreshData fills the caches that pages and the policy report show from: the Settings values (the
@@ -490,8 +523,19 @@ func (a *runtime) wireDeviceRefresh(r *brokerHostReader) {
 // check is off, policyReadsOff), and the GPIO template reading. The first part that fails ends the read:
 // the device does not answer, and the retry reads all.
 func (a *runtime) refreshData(ctx context.Context, d model.Device) error {
-	if err := a.svc.Prober.VerifyAddress(ctx, d); err != nil { // fail closed: only the stored device fills these caches
+	// Through the router (VerifyRead): over HTTP the check would refuse every device whose HTTP API is off (#676).
+	// The rest of the refresh goes over the transport this check went over, so the check vouches for every read:
+	// over MQTT for the topic (pinnedToMQTTCheck: no read falls back to HTTP, where another device may hold the
+	// address, and the checks after the reads are not asked again), otherwise for the address, over HTTP, with every
+	// check after the reads asked again there (#662). A device without a stored MAC sends nothing here: HTTP.
+	tctx, trace := transport.WithTrace(ctx)
+	if err := a.svc.Prober.VerifyRead(tctx, d); err != nil { // fail closed: only the stored device fills these caches
 		return err
+	}
+	if trace.Via() == "mqtt" {
+		ctx = pinnedToMQTTCheck(ctx)
+	} else {
+		ctx = transport.WithPath(ctx, transport.HTTP)
 	}
 	if a.settings != nil {
 		if _, err := a.settings.Read(ctx, d.ID); err != nil {

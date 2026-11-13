@@ -19,6 +19,7 @@ import (
 	"github.com/hellwand/tasmofleet/internal/settings"
 	"github.com/hellwand/tasmofleet/internal/sysconfig"
 	"github.com/hellwand/tasmofleet/internal/templates"
+	"github.com/hellwand/tasmofleet/internal/transport"
 	"github.com/hellwand/tasmofleet/internal/web"
 )
 
@@ -408,6 +409,16 @@ func (p *policyReporter) readDevice(ctx context.Context, d model.Device) bool {
 	}
 	id := d.ID
 	cmds := ruleCommands(p.currentRules())
+	if pin, _ := transport.PathFrom(ctx); pin == transport.MQTT {
+		// a refresh pinned to MQTT (#676) leaves out what the router keeps HTTP first while HTTP works: a read the
+		// channel cannot match (State, whose reply holds no "State" key, so no value either way) would only time out,
+		// and one it counts as a write (PulseTime1, Mem1: not cmdpolicy.ReportsOnly) needs the strict write
+		// conditions there. Either would fail the policy part and with it the template part; the policy poller,
+		// under the same gate, keeps reading them unpinned.
+		cmds = slices.DeleteFunc(cmds, func(c string) bool {
+			return transport.MQTTCannotMatch(c) || transport.CommandAction(c) != transport.ActCommands
+		})
+	}
 	if len(cmds) == 0 {
 		return true
 	}

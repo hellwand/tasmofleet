@@ -18,6 +18,7 @@ import (
 	"github.com/hellwand/tasmofleet/internal/settings"
 	"github.com/hellwand/tasmofleet/internal/store"
 	"github.com/hellwand/tasmofleet/internal/tasmota"
+	"github.com/hellwand/tasmofleet/internal/transport"
 )
 
 // identityStore is the part of the store the prober needs.
@@ -564,13 +565,32 @@ func (p *Prober) VerifyAddress(ctx context.Context, d model.Device) error {
 // their check must too, like ReadNet's. Over HTTP it would vouch for whoever holds the address while the
 // values came from the device on the topic, and it refused every read of a device whose HTTP API is off
 // (#662). ReadBroker reads over HTTP and keeps VerifyAddress.
+//
+// Inside a data refresh whose first check the stored device answered over MQTT (pinnedToMQTTCheck) the checks after
+// the reads are not asked again (#676): every read of that refresh is pinned to MQTT, so it reached the topic the
+// first check vouched for, and the refresh asked the same question up to three times (before the reads, after the
+// Settings read, after the policy read). Over HTTP every check stays: the answer comes from whoever holds the
+// address, and a lease handed to another device between two reads is what the checks after the reads are for (#662).
 func (p *Prober) VerifyRead(ctx context.Context, d model.Device) error {
 	if p.Reads == nil {
 		return p.VerifyAddress(ctx, d)
 	}
+	if checked, _ := ctx.Value(mqttCheckedKey{}).(bool); checked {
+		return nil
+	}
 	c := *p
 	c.Client = p.Reads
 	return c.VerifyAddress(ctx, d)
+}
+
+type mqttCheckedKey struct{}
+
+// pinnedToMQTTCheck pins every later call of a data refresh to MQTT (no fallback to HTTP, where another device may
+// hold the address: a read MQTT leaves unanswered fails the refresh) and lets VerifyRead rely on the refresh's first
+// check, which the stored device answered over MQTT. Both in one place: the check is skipped only where nothing can
+// go over HTTP. It belongs to one refresh of one device: nothing outside it (a page open, another visit) sees it.
+func pinnedToMQTTCheck(ctx context.Context) context.Context {
+	return context.WithValue(transport.WithPath(ctx, transport.MQTT), mqttCheckedKey{}, true)
 }
 
 // ReadBroker re-reads the broker a stored device is configured for (Status 6, and SetOption3 when a
