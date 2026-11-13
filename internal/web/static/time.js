@@ -19,6 +19,9 @@
     // a log column: 24-hour like the device's own console, and no AM/PM to widen the fixed column
     "clock-24": Object.assign({ hourCycle: "h23" }, HMS),
     short: Object.assign({ year: "numeric", month: "short", day: "numeric" }, HM),
+    // a scheduled update's start (#604): "Sat 03:00", "Nov 7"
+    "weekday-time": Object.assign({ weekday: "short" }, HM),
+    "month-day": { month: "short", day: "numeric" },
   };
   var FULL = Object.assign({}, D, HMS, { timeZoneName: "short" });
   var cache = {};
@@ -54,12 +57,18 @@
     var same = d.getFullYear() === now.getFullYear() && d.getMonth() === now.getMonth() && d.getDate() === now.getDate();
     return same ? fmt("time", HM).format(d) : dayText(d);
   }
+  // start: "Sat, Nov 7 at 03:00", the start of a scheduled update in a sentence (#604); the server's fallback is
+  // ui.StampStart.
+  function startText(d) {
+    return fmt("start-day", { weekday: "short", month: "short", day: "numeric" }).format(d) + " at " + fmt("time", HM).format(d);
+  }
   // textOf is the text for a format key and an instant ("" when the key is unknown). "title"
   // leaves the text alone, so it is "" here and handled by the caller.
   function textOf(key, d) {
     if (key === "store") return storeText(d);
     if (key === "day") return dayText(d);
     if (key === "clock-day") return clockOrDayText(d);
+    if (key === "start") return startText(d);
     return SPECS[key] ? fmt(key, SPECS[key]).format(d) : "";
   }
   function paint(root) {

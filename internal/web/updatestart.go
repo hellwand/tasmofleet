@@ -138,8 +138,11 @@ func (w whenState) StartsText() string {
 }
 
 // StartsIn is how far away the start is: "in 17 h", "in 5 d 16 h", "in 12 min".
-func (w whenState) StartsIn() string {
-	mins := int(w.Start.Sub(w.Now).Minutes())
+func (w whenState) StartsIn() string { return startsIn(w.Now, w.Start) }
+
+// startsIn words how far start lies after now.
+func startsIn(now, start time.Time) string {
+	mins := int(start.Sub(now).Minutes())
 	if mins < 60 {
 		return "in " + strconv.Itoa(max(mins, 1)) + " min"
 	}

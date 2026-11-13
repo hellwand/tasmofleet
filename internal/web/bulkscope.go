@@ -433,6 +433,8 @@ func (h *handler) jobResultRow(r *http.Request, j jobView, rv *bulkResultView) b
 		rv.Failed++
 	case model.JobQueued:
 		row.Label, row.Tone = "Queued", ui.ToneNeutral
+	case model.JobScheduled:
+		row.Label, row.Tone = "Planned", ui.ToneNeutral // waits for its start (#604)
 	default:
 		// The device's reply of an earlier step is not shown while the job still runs: the
 		// row would say "Running" next to a finished answer. The step in progress is.

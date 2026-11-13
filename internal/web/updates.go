@@ -230,10 +230,16 @@ func (h *handler) updateFormData(r *http.Request, selected []model.DeviceID, mod
 	}
 	// A device in a running transaction is refused by the engine; the picker says so up front.
 	busy := map[model.DeviceID]bool{}
+	planned := map[model.DeviceID]model.BatchID{} // a plan holds its device too (#604), but it is not "running"
 	if h.d.Jobs != nil {
 		if act, err := h.d.Jobs.ListJobs(r.Context(), store.JobFilter{States: activeJobStates}); err == nil {
 			for _, j := range act {
 				busy[j.DeviceID] = true
+			}
+		}
+		if act, err := h.d.Jobs.ListJobs(r.Context(), store.JobFilter{States: []model.JobState{model.JobScheduled}}); err == nil {
+			for _, j := range act {
+				planned[j.DeviceID] = j.BatchID
 			}
 		}
 	}
@@ -246,6 +252,9 @@ func (h *handler) updateFormData(r *http.Request, selected []model.DeviceID, mod
 		}
 		if blocked == "" && busy[d.ID] {
 			blocked = "In a running transaction"
+		}
+		if b, ok := planned[d.ID]; blocked == "" && ok {
+			blocked = "Planned in " + txID(b)
 		}
 		o := updateOption{Device: d, Health: row.Health.State, Blocked: blocked,
 			Update: f.Release != "" && versionOlder(d.Identity.Version, f.Release),
@@ -930,6 +939,10 @@ type jobView struct {
 	Step        int    // 0..jobSteps, drives the progress bar
 	StepLabel   string // what the device is doing now
 	Log         []logLine
+	// The story of a planned job (#604), read from its events: when it started (start_due), when TasmoFleet came
+	// back and found it too late (not_started), and who cancelled it before its start and when.
+	StartedAt, NotStartedAt, CancelledAt time.Time
+	CancelledBy                          string
 }
 
 // logLine is one line of the per-device update log (a persisted job event).
@@ -951,6 +964,9 @@ type batchPage struct {
 	Canceled                             int
 	CancelPending                        int    // still running, but a cancel was requested: it stops after the current step
 	By                                   string // who started it
+	// Planned jobs wait for their start (#604). NotStarted and Early are cancelled jobs that never ran: the
+	// start passed while TasmoFleet was down, or a person cancelled the plan.
+	Planned, NotStarted, Early int
 }
 
 func (h *handler) jobViews(r *http.Request, f store.JobFilter) ([]jobView, bool, error) {
@@ -980,13 +996,24 @@ func (h *handler) jobViews(r *http.Request, f store.JobFilter) ([]jobView, bool,
 		case j.IsBackup():
 			v.Step, v.StepLabel = backupStep(j.State)
 		}
-		v.CanRetry = j.State == model.JobFailed || j.State == model.JobCancelled
+		// A job that never ran (its start passed while TasmoFleet was down, or a person cancelled the plan) is not
+		// retried: a retry starts at once, which is not what was planned. "Plan again…" is the way on.
+		v.CanRetry = (j.State == model.JobFailed || j.State == model.JobCancelled) && !neverRan(j)
 		if v.Active && j.CancelRequested {
 			v.StepLabel += ", cancel requested" // a flash cannot be stopped: the job ends after this step
 		}
 		if evs, err := h.d.Jobs.JobEvents(r.Context(), j.ID); err == nil {
 			for i, e := range evs {
 				v.Log = append(v.Log, logLine{At: e.At, Text: eventText(e, j, h.pr, eventStageMinimal(evs, i, j)), Err: errEvents[e.Event] || e.To == model.JobFailed})
+				switch {
+				case e.Event == "start_due":
+					v.StartedAt = e.At
+				case e.Event == "not_started":
+					v.NotStartedAt = e.At
+				case e.Event == "cancel" && e.From == model.JobScheduled && e.To == model.JobCancelled:
+					v.CancelledAt = e.At
+					v.CancelledBy, _ = strings.CutPrefix(e.Detail, "cancelled by ")
+				}
 			}
 		}
 		any = any || v.Active
@@ -1030,8 +1057,15 @@ func (h *handler) batchData(w http.ResponseWriter, r *http.Request) (batchPage, 
 			p.Failed++
 		case model.JobCancelled:
 			p.Canceled++
+			if j.Job.NotStarted {
+				p.NotStarted++
+			} else if neverRan(j.Job) {
+				p.Early++
+			}
 		case model.JobQueued:
 			p.Queued++
+		case model.JobScheduled:
+			p.Planned++
 		default:
 			p.Running++
 		}
@@ -1092,10 +1126,21 @@ func (h *handler) txnPageData(w http.ResponseWriter, r *http.Request) (txnPage, 
 		Total: b.Total, Done: b.Done, Running: b.Running, Queued: b.Queued, Failed: b.Failed, Canceled: b.Canceled, CancelPending: b.CancelPending,
 		RetryOf: b.RetryOf, RetriedBy: b.RetriedBy}
 	p.State, p.StateTone = txResult(b.Done, b.Running, b.Queued, b.Failed, b.Canceled)
+	p.State, p.StateTone = schedResult(p.State, p.StateTone, schedCounts{Total: b.Total, Planned: b.Planned, Running: b.Running, Queued: b.Queued, NotStarted: b.NotStarted, Early: b.Early})
+	p.Planned = b.Planned
+	// Nothing of it has run: a plan that waits, or one that ended without starting.
+	p.Waiting = b.Planned > 0 && b.Running+b.Queued+b.Done == 0
+	p.NeverRan = b.NotStarted+b.Early == b.Total
+	if p.NeverRan && b.Early == b.Total {
+		p.State, p.StateTone = "Cancelled before start", ui.ToneNeutral
+	}
 	p.Bar = ui.TxnData{OK: b.Done, Failed: b.Failed, Active: b.Running, Total: b.Total}
+	if p.NeverRan {
+		p.Bar.Stopped = b.Total // drawn grey: nobody failed, nothing ran
+	}
 	p.RetryN = b.Failed
 	if !b.Active {
-		p.RetryN += b.Canceled
+		p.RetryN += b.Canceled - b.NotStarted - b.Early // what never ran is planned again, not retried
 	}
 	p.CancelText = cancelText(b.Queued)
 	who := h.pr.Text(b.By)
@@ -1126,11 +1171,15 @@ func (h *handler) txnPageData(w http.ResponseWriter, r *http.Request) (txnPage, 
 		if par == 0 {
 			par = h.otaParallel()
 		}
-		p.Sub = "started by " + who + " · " + strconv.Itoa(par) + " at a time"
+		tail := strconv.Itoa(par) + " at a time"
 		if first.SkipBackup {
-			p.Sub += " · no backup"
+			tail += " · no backup"
 		} else {
-			p.Sub += " · backup first"
+			tail += " · backup first"
+		}
+		p.Sub = "started by " + who + " · " + tail
+		if !first.StartAt.IsZero() {
+			p.Sched = h.txnSchedOf(r, b, first, who, tail, h.d.Clock.Now())
 		}
 	default:
 		p.Sub = "started by " + who
@@ -1139,6 +1188,8 @@ func (h *handler) txnPageData(w http.ResponseWriter, r *http.Request) (txnPage, 
 		}
 	}
 	sel := h.selectedJob(r, b.Jobs)
+	// A plan that has not run has no log to read: no device is the open one, and none is highlighted.
+	noLog := (p.Waiting && b.Failed == 0) || p.NeverRan
 	p.LiveURL = b.Base + "/transactions/" + bid(b.Batch) + "/live"
 	if sel != nil {
 		p.LiveURL += "?job=" + jid(sel.Job.ID)
@@ -1156,7 +1207,7 @@ func (h *handler) txnPageData(w http.ResponseWriter, r *http.Request) (txnPage, 
 			p.Cards = append(p.Cards, fixCardOf(j, b.Base))
 			continue
 		}
-		row := txnRow{JobID: j.Job.ID, Name: j.Device, Href: b.Base + "/transactions/" + bid(b.Batch) + "?job=" + jid(j.Job.ID), Selected: sel != nil && sel.Job.ID == j.Job.ID}
+		row := txnRow{JobID: j.Job.ID, Name: j.Device, Href: b.Base + "/transactions/" + bid(b.Batch) + "?job=" + jid(j.Job.ID), Selected: sel != nil && sel.Job.ID == j.Job.ID && !noLog}
 		row.Badge, row.Tone = jobBadge(j.Job)
 		if j.Job.IsUpdate() {
 			row.Upload = j.Job.Delivery == model.DeliveryPush
@@ -1168,17 +1219,21 @@ func (h *handler) txnPageData(w http.ResponseWriter, r *http.Request) (txnPage, 
 		} else {
 			row.To = txTarget(j.Job)
 		}
-		if j.Active && j.Job.State != model.JobQueued {
+		if j.Active && j.Job.State != model.JobQueued && j.Job.State != model.JobScheduled {
 			row.Bar, row.Pct = true, j.Step*100/jobSteps
 		}
 		p.Rows = append(p.Rows, row)
 	}
-	if sel != nil && !p.Policy && !p.Template {
+	if sel != nil && !p.Policy && !p.Template && !noLog {
 		s := &txnSel{JobID: sel.Job.ID, DeviceID: sel.Job.DeviceID, Name: sel.Device,
 			CanCancel: sel.Active && !sel.Job.CancelRequested, CanRetry: sel.CanRetry && !b.Active}
 		s.Log = append(s.Log, sel.Log...)
 		if sel.Job.LastError != "" {
-			s.Log = append(s.Log, logLine{At: sel.Job.UpdatedAt, Text: "Error: " + sel.Job.LastError, Err: true})
+			text := sel.Job.LastError
+			if t, ok := scheduledRefusalText(text); ok {
+				text = t
+			}
+			s.Log = append(s.Log, logLine{At: sel.Job.UpdatedAt, Text: "Error: " + text, Err: true})
 		}
 		p.Sel = s
 	}
@@ -1206,7 +1261,9 @@ func (h *handler) selectedJob(r *http.Request, jobs []jobView) *jobView {
 	}
 	for _, pick := range []func(j jobView) bool{
 		func(j jobView) bool { return j.Job.State == model.JobFailed },
-		func(j jobView) bool { return j.Active && j.Job.State != model.JobQueued },
+		func(j jobView) bool {
+			return j.Active && j.Job.State != model.JobQueued && j.Job.State != model.JobScheduled
+		},
 	} {
 		for i := range jobs {
 			if pick(jobs[i]) {
@@ -1315,10 +1372,14 @@ type txView struct {
 	Canceled int
 	Outcome  string
 	Tone     string
-	RetryOf  model.BatchID
-	Update   bool      // a firmware update (not a command, backup or policy run)
-	Title    string    // what the transaction does ("Update to Tasmota 14.3.0")
-	first    model.Job // the first job seen, for the title
+	// A planned update (#604): Planned jobs wait for their start, NotStarted and Early are the cancelled jobs
+	// that never ran, StartAt is the planned start (zero: started at once).
+	Planned, NotStarted, Early int
+	StartAt                    time.Time
+	RetryOf                    model.BatchID
+	Update                     bool      // a firmware update (not a command, backup or policy run)
+	Title                      string    // what the transaction does ("Update to Tasmota 14.3.0")
+	first                      model.Job // the first job seen, for the title
 }
 
 // txOutcome words the result of a transaction.
@@ -1350,6 +1411,9 @@ func groupTransactions(jobs []model.Job) []txView {
 			order = append(order, j.BatchID)
 		}
 		t.Total++
+		if t.StartAt.IsZero() {
+			t.StartAt = j.StartAt
+		}
 		if j.CreatedAt.Before(t.Started) {
 			t.Started = j.CreatedAt
 		}
@@ -1360,8 +1424,15 @@ func groupTransactions(jobs []model.Job) []txView {
 			t.Failed++
 		case model.JobCancelled:
 			t.Canceled++
+			if j.NotStarted {
+				t.NotStarted++
+			} else if neverRan(j) {
+				t.Early++
+			}
 		case model.JobQueued:
 			t.Queued++
+		case model.JobScheduled:
+			t.Planned++
 		default:
 			t.Running++
 		}
@@ -1369,7 +1440,14 @@ func groupTransactions(jobs []model.Job) []txView {
 	out := make([]txView, 0, len(order))
 	for _, id := range order {
 		t := by[id]
-		t.Outcome, t.Tone = txOutcome(t.Total, t.Done, t.Running, t.Queued, t.Failed, t.Canceled)
+		t.Outcome, t.Tone = txOutcome(t.Total-t.Planned, t.Done, t.Running, t.Queued, t.Failed, t.Canceled)
+		switch {
+		case t.Running+t.Queued > 0:
+		case t.Planned > 0:
+			t.Outcome, t.Tone = "Scheduled", "info"
+		case t.NotStarted > 0 && t.NotStarted+t.Early == t.Total:
+			t.Outcome, t.Tone = "Not started", "warn"
+		}
 		t.Title = txTitle(t.first, t.Total)
 		out = append(out, *t)
 	}
@@ -1394,7 +1472,7 @@ func (t txView) Summary() string {
 	for _, x := range []struct {
 		n    int
 		word string
-	}{{t.Failed, "failed"}, {t.Canceled, "cancelled"}, {t.Running, "running"}, {t.Queued, "waiting"}} {
+	}{{t.Failed, "failed"}, {t.Canceled, "cancelled"}, {t.Running, "running"}, {t.Queued, "waiting"}, {t.Planned, "planned"}} {
 		if x.n > 0 {
 			s += fmt.Sprintf(", %d %s", x.n, x.word)
 		}
@@ -1431,18 +1509,40 @@ func (h *handler) transactionsPage(w http.ResponseWriter, r *http.Request) {
 	now := h.d.Clock.Now()
 	items := groupTransactions(raw)
 	sort.SliceStable(items, func(a, b int) bool { return items[a].ID > items[b].ID }) // newest first
+	// The plans that still wait for their start have their own section above the history (#604).
+	sched, shown, err := h.scheduledRows(r, filter.DeviceID, p.Base, now, items)
+	if err != nil {
+		h.fail(w, r, err)
+		return
+	}
+	p.Scheduled = sched
 	for _, t := range items {
+		if shown[t.ID] {
+			continue
+		}
 		href := p.Base + "/transactions/" + bid(t.ID)
 		res, tone := txResult(t.Done, t.Running, t.Queued, t.Failed, t.Canceled)
+		res, tone = schedResult(res, tone, schedCounts{Total: t.Total, Planned: t.Planned, Running: t.Running, Queued: t.Queued, NotStarted: t.NotStarted, Early: t.Early})
 		if t.Running+t.Queued > 0 {
 			p.Running = append(p.Running, ui.TxnData{ID: txID(t.ID), Title: t.Title, State: res, StateTone: tone, Summary: t.RunSummary(),
 				Href: href, OK: t.Done, Failed: t.Failed, Active: t.Running, Total: t.Total})
 		}
-		p.History = append(p.History, txHistRow{ID: txID(t.ID), Title: t.Title, Devices: plural(t.Total, "device"), Result: res, Tone: tone,
-			By: h.pr.Text(t.By), When: ui.StampDayText(now, t.Started), At: t.Started.Format(time.RFC3339), Href: href})
+		row := txHistRow{ID: txID(t.ID), Title: t.Title, Devices: plural(t.Total, "device"), Result: res, Tone: tone,
+			By: h.pr.Text(t.By), When: ui.StampDayText(now, t.Started), At: t.Started.Format(time.RFC3339), Href: href}
+		if !t.StartAt.IsZero() {
+			// A planned update is dated by its planned start, not by the day somebody planned it.
+			row.Due, row.When, row.At = t.StartAt, ui.StampDayText(now, t.StartAt), t.StartAt.Format(time.RFC3339)
+			if t.NotStarted+t.Early > 0 {
+				row.WhenLabel = "was due "
+			} else {
+				row.Suffix = " · scheduled"
+			}
+		}
+		p.History = append(p.History, row)
 	}
 	v := h.view(r, "Updates", "transactions", nil) // the phone header names the group, as the prototype does
 	v.Live = true
+	p.CSRF = v.CSRF
 	h.show(w, r, http.StatusOK, "transactions", v, transactionsPage(p))
 }
 
@@ -1454,6 +1554,9 @@ func (t txView) RunSummary() string {
 	}
 	if t.Running > 0 {
 		s += fmt.Sprintf(" · %d in progress", t.Running)
+	}
+	if t.Planned > 0 {
+		s += fmt.Sprintf(" · %d planned", t.Planned)
 	}
 	return s
 }
@@ -1672,6 +1775,14 @@ func (h *handler) batchRetry(w http.ResponseWriter, r *http.Request) {
 				h.message(w, r, http.StatusConflict, h.view(r, "Retry not started", "transactions", "This retry sends a destructive command again. Open the retry page and confirm it first."))
 				return
 			}
+		}
+	}
+	for _, j := range jobs {
+		if picked := h.formIDs(r); neverRan(j.Job) && (len(picked) == 0 || slices.Contains(picked, j.Job.DeviceID)) {
+			// A retry starts at once, which is not what was planned: the person plans it again.
+			h.message(w, r, http.StatusConflict, h.view(r, "Retry not started", "transactions",
+				"Nothing was started. "+j.Device+" never started, and a retry would start it at once. Use \"Plan again…\" on the transaction to choose a new time."))
+			return
 		}
 	}
 	if why := h.retryAPIOff(r.Context(), jobs, h.formIDs(r)); why != "" {

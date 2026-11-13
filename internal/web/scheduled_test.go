@@ -1,0 +1,434 @@
+package web
+
+import (
+	"log/slog"
+	"net/http"
+	"net/http/httptest"
+	"net/url"
+	"regexp"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/hellwand/tasmofleet/internal/model"
+)
+
+// The Transactions pages of a scheduled update (#604, package 2). "Now" is the mockup's Friday 10:21; the
+// server's zone is UTC in these tests (main_test.go), so the fallback texts of the <time> elements read in UTC.
+var (
+	fri = time.Date(2026, 11, 6, 10, 21, 0, 0, time.UTC)
+	sat = time.Date(2026, 11, 7, 3, 0, 0, 0, time.UTC)
+	sun = time.Date(2026, 11, 8, 3, 0, 0, 0, time.UTC)
+)
+
+// schedJob is one device of a scheduled update transaction.
+func schedJob(id model.JobID, batch model.BatchID, dev model.DeviceID, state model.JobState, start time.Time) model.Job {
+	return model.Job{ID: id, BatchID: batch, DeviceID: dev, State: state, StartAt: start, TargetRelease: "16.1.0",
+		IdentityBefore: model.Identity{Version: "16.0.0"}, Policy: model.PolicyOnlyNewer, CreatedBy: "adam", CreatedAt: fri, UpdatedAt: fri}
+}
+
+func eventOf(job model.JobID, at time.Time, from, to model.JobState, ev, detail string) model.JobEvent {
+	return model.JobEvent{JobID: job, At: at, From: from, To: to, Event: ev, Detail: detail}
+}
+
+var stateBadge = regexp.MustCompile(`id="txn-state" class="([^"]*)">([^<]*)<`)
+
+// txnState is the transaction-level badge: its tone class and its word.
+func txnState(t *testing.T, body string) (class, word string) {
+	t.Helper()
+	m := stateBadge.FindStringSubmatch(body)
+	if m == nil {
+		t.Fatalf("no transaction badge in: %s", body)
+	}
+	return m[1], m[2]
+}
+
+// Why (#604): a plan nobody can see is a plan nobody can cancel. Transactions lists what is planned, soonest
+// first, with its start and a Cancel that says what it does; it is not a running transaction, so it is not in
+// the running cards and nothing on the page calls it queued or running.
+func TestTransactionsListsScheduledJobsSoonestFirstAboveHistory(t *testing.T) {
+	e, _, jobs, _ := setupOTAAt(t, fixedClock{fri})
+	jobs.jobs = []model.Job{
+		schedJob(22, 9, 3, model.JobScheduled, sun), // newer, but starts later
+		schedJob(20, 10, 1, model.JobScheduled, sat),
+		schedJob(21, 10, 2, model.JobScheduled, sat),
+		schedJob(1, 7, 1, model.JobSucceeded, time.Time{}),
+	}
+	jobs.jobs[3].CreatedAt = fri.Add(-48 * time.Hour)
+	_, body := e.do(t, "GET", "/transactions", "operator", nil)
+	text := plain(body)
+	for _, want := range []string{"Scheduled · 2", "TX-0010 Update to Tasmota 16.1.0 2 devices", "Starts Sat 03:00", "Nov 7 · in 17 h · adam", "Starts Sun 03:00", "Nov 8 · in 1 d 17 h"} {
+		if !strings.Contains(text, want) {
+			t.Errorf("the Scheduled section lacks %q in: %s", want, text)
+		}
+	}
+	if i, j, k := strings.Index(text, "TX-0010"), strings.Index(text, "TX-0009"), strings.Index(text, "History"); i < 0 || i >= j || j >= k {
+		t.Errorf("order: TX-0010 at %d, TX-0009 at %d, History at %d: soonest start first, above History", i, j, k)
+	}
+	for _, bad := range []string{"Running", "Queued", "queued", "in progress", "upd-run"} {
+		if strings.Contains(body, bad) {
+			t.Errorf("a scheduled update reads as active (%q) on the list", bad)
+		}
+	}
+	cancel := tagOf(t, body, `data-dlg-title="Cancel TX-0010?"`)
+	for _, want := range []string{"It will not start and nothing on the devices changes", `data-dlg-action="/tf/transactions/10/cancel"`, `data-dlg-verb="Cancel schedule"`, `data-dlg-dismiss="Keep schedule"`} {
+		if !strings.Contains(cancel, want) {
+			t.Errorf("the Cancel of TX-0010 lacks %q in: %s", want, cancel)
+		}
+	}
+	// the start is a <time> for time.js: the browser's zone, like every other time of the app
+	if !strings.Contains(body, `data-ts="weekday-time"`) {
+		t.Errorf("the start is plain text: it would read in the server's zone")
+	}
+}
+
+// Why (#604): the three ways a planned update ends read differently in History. Not started is a warning
+// (nobody cancelled it and it did not run), cancelled is neutral, and an update that ran says it was planned.
+func TestTransactionsHistoryWordsTheOutcomesOfPlannedUpdates(t *testing.T) {
+	e, _, jobs, _ := setupOTAAt(t, fixedClock{fri})
+	due := time.Date(2026, 11, 5, 3, 0, 0, 0, time.UTC)
+	ran := time.Date(2026, 11, 3, 3, 0, 0, 0, time.UTC)
+	j8 := schedJob(30, 8, 1, model.JobCancelled, due)
+	j8.NotStarted, j8.UpdatedAt = true, due.Add(72*time.Minute)
+	j7 := schedJob(31, 7, 2, model.JobCancelled, time.Date(2026, 11, 4, 3, 0, 0, 0, time.UTC))
+	j7.UpdatedAt = time.Date(2026, 11, 3, 18, 40, 0, 0, time.UTC) // cancelled before its start
+	j6 := schedJob(32, 6, 3, model.JobSucceeded, ran)
+	j6.UpdatedAt = ran.Add(10 * time.Second)
+	jobs.jobs = []model.Job{j8, j7, j6}
+	_, body := e.do(t, "GET", "/transactions", "operator", nil)
+	if strings.Contains(body, "sched-h") {
+		t.Errorf("nothing waits for its start, yet an empty Scheduled section is drawn")
+	}
+	row := func(id string) string { return between(body, `<span class="upd-hid">`+id+`</span>`, `</a>`) }
+	if r := row("TX-0008"); !strings.Contains(r, `bdg t-warn">Not started<`) || !strings.Contains(plain(r), "was due") {
+		t.Errorf("TX-0008 (not started) reads: %s", r)
+	}
+	if r := row("TX-0007"); !strings.Contains(r, `bdg t-neutral">Cancelled<`) || !strings.Contains(plain(r), "was due") {
+		t.Errorf("TX-0007 (cancelled before its start) reads: %s", r)
+	}
+	if r := row("TX-0006"); !strings.Contains(r, `bdg t-ok">`) || !strings.Contains(plain(r), "· scheduled") || strings.Contains(plain(r), "was due") {
+		t.Errorf("TX-0006 (ran as planned) reads: %s", r)
+	}
+}
+
+// Why (#604): the page of a plan says when it starts and what happens if TasmoFleet is down then (the words of
+// the preview), shows its devices as "Planned" (they are not queued: they hold no slot) and offers only Cancel.
+// The transaction as a whole reads "Scheduled".
+func TestScheduledTransactionPage(t *testing.T) {
+	e, _, jobs, _ := setupOTAAt(t, fixedClock{fri})
+	jobs.jobs = []model.Job{schedJob(20, 10, 1, model.JobScheduled, sat), schedJob(21, 10, 2, model.JobScheduled, sat)}
+	_, body := e.do(t, "GET", "/transactions/10", "operator", nil)
+	text := plain(body)
+	if class, word := txnState(t, body); word != "Scheduled" || !strings.Contains(class, "t-accent") {
+		t.Errorf("transaction badge %q (%s), want Scheduled in the accent tone", word, class)
+	}
+	for _, want := range []string{
+		"Starts Sat, Nov 7 at 03:00 · in 17 h",
+		"If TasmoFleet is down at 03:00, the update starts as soon as TasmoFleet is back, but only until 04:00 (60 minutes after the start time). If TasmoFleet is back later than that, the update is not started at all and TasmoFleet sends a notification. Devices are checked again when the update starts.",
+		"Until it starts you can cancel it here.",
+		"planned by adam",
+	} {
+		if !strings.Contains(text, want) {
+			t.Errorf("the page lacks %q in: %s", want, text)
+		}
+	}
+	if n := strings.Count(body, `bdg t-neutral">Planned<`); n != 2 {
+		t.Errorf("%d devices read Planned in the neutral tone, want 2", n)
+	}
+	for _, bad := range []string{"Queued", "queued", "Waiting for a free slot", "Retry failed", "/retry", "Cancel remaining", "Log ·", "in progress", `every 3s`} {
+		if strings.Contains(body, bad) {
+			t.Errorf("the page of a plan shows %q", bad)
+		}
+	}
+	cancel := tagOf(t, body, `data-dlg-title="Cancel TX-0010?"`)
+	for _, want := range []string{"It will not start and nothing on the devices changes", `data-dlg-action="/tf/transactions/10/cancel"`, `data-dlg-verb="Cancel schedule"`} {
+		if !strings.Contains(cancel, want) {
+			t.Errorf("Cancel lacks %q in: %s", want, cancel)
+		}
+	}
+	if strings.Contains(body, "Change time") {
+		t.Errorf("a plan is changed by cancelling and planning again, not by a Change time")
+	}
+}
+
+// Why (#604): the cancel of a plan (its own page without JavaScript) must not promise what a running update
+// does ("finish their update").
+func TestCancelConfirmOfAPlanSaysNothingChanges(t *testing.T) {
+	e, _, jobs, _ := setupOTAAt(t, fixedClock{fri})
+	jobs.jobs = []model.Job{schedJob(20, 10, 1, model.JobScheduled, sat)}
+	for _, path := range []string{"/transactions/10/cancel", "/jobs/20/cancel"} {
+		resp, body := e.do(t, "GET", path, "operator", nil)
+		if resp.StatusCode != http.StatusOK || !strings.Contains(plain(body), "It will not start and nothing on the devices changes") || strings.Contains(body, "finish their update") || strings.Contains(body, "running flash") {
+			t.Errorf("%s: %d %s", path, resp.StatusCode, body)
+		}
+	}
+}
+
+// Why (#604): an update that started at its time says so, and how late: the person who planned it wants to
+// know it ran when it should.
+func TestStartedOnTimeHasItsLine(t *testing.T) {
+	e, _, jobs, _ := setupOTAAt(t, fixedClock{fri})
+	tue := time.Date(2026, 11, 3, 3, 0, 0, 0, time.UTC)
+	for _, c := range []struct {
+		late time.Duration
+		want string
+	}{
+		{0, "Started on time, at the planned 03:00."},
+		{2 * time.Second, "Started on time, 2 seconds after the planned 03:00."},
+		{12 * time.Minute, "Started 12 minutes after the planned 03:00, within the 60 minutes a late start is allowed."},
+	} {
+		j1, j2 := schedJob(40, 6, 1, model.JobSucceeded, tue), schedJob(41, 6, 2, model.JobSucceeded, tue)
+		jobs.jobs = []model.Job{j1, j2}
+		jobs.events = map[model.JobID][]model.JobEvent{
+			40: {eventOf(40, tue.Add(c.late), model.JobScheduled, model.JobQueued, "start_due", "planned for Tue, Nov 3 at 03:00, started "+c.late.String()+" after it")},
+			41: {eventOf(41, tue.Add(c.late), model.JobScheduled, model.JobQueued, "start_due", "planned for Tue, Nov 3 at 03:00")},
+		}
+		_, body := e.do(t, "GET", "/transactions/6", "operator", nil)
+		text := plain(body)
+		if !strings.Contains(text, c.want) {
+			t.Errorf("late %s: the page lacks %q in: %s", c.late, c.want, text)
+		}
+		if !strings.Contains(text, "planned by adam for Tue, Nov 3 at 03:00") || !strings.Contains(text, "started 03:") {
+			t.Errorf("late %s: the header does not say what was planned and when it started: %s", c.late, text)
+		}
+		if _, word := txnState(t, body); word != "Completed" {
+			t.Errorf("late %s: badge %q: an update that ran is a normal transaction", c.late, word)
+		}
+		if !strings.Contains(text, "Started as planned (planned for 03:00") && c.late < time.Minute {
+			t.Errorf("the log lacks the line of the start: %s", text)
+		}
+	}
+}
+
+// Why (#604): TasmoFleet was down and nobody cancelled this: the page is a warning with the reason, the
+// text of the notification that went out, and the one way on: plan it again. Retrying it would start it at
+// once, which is not what the person planned, so there is no Retry.
+func TestNotStartedTransactionPage(t *testing.T) {
+	e, o, jobs, _ := setupOTAAt(t, fixedClock{fri})
+	due := time.Date(2026, 11, 5, 3, 0, 0, 0, time.UTC)
+	back := due.Add(72 * time.Minute)
+	jobs.jobs = nil
+	for _, id := range []model.JobID{50, 51} {
+		j := schedJob(id, 8, model.DeviceID(id-49), model.JobCancelled, due)
+		j.NotStarted, j.UpdatedAt, j.SkipBackup = true, back, true
+		j.LastError = "TasmoFleet was down at the planned start"
+		jobs.jobs = append(jobs.jobs, j)
+	}
+	jobs.events = map[model.JobID][]model.JobEvent{
+		50: {eventOf(50, back, model.JobScheduled, model.JobCancelled, "not_started", "x")},
+		51: {eventOf(51, back, model.JobScheduled, model.JobCancelled, "not_started", "x")},
+	}
+	_, body := e.do(t, "GET", "/transactions/8", "operator", nil)
+	text := plain(body)
+	if class, word := txnState(t, body); word != "Not started" || !strings.Contains(class, "t-warn") {
+		t.Errorf("badge %q (%s), want Not started in the warn tone", word, class)
+	}
+	banner := between(body, `class="banner tone-warn"`, `</div></div>`)
+	for _, want := range []string{"Not started.", "TasmoFleet was down at the planned start", "Thu, Nov 5 at 03:00", "was not back within 60 minutes", "came back at", "04:12", "No device was changed, and this update will not start later."} {
+		if !strings.Contains(plain(banner), want) {
+			t.Errorf("the warning lacks %q: %s", want, plain(banner))
+		}
+	}
+	for _, want := range []string{
+		"Scheduled update not started",
+		"TX-0008 (Update to Tasmota 16.1.0, 2 devices) was planned for Thu, Nov 5 at 03:00. TasmoFleet was down and was not back within 60 minutes, so the update was not started and no device was changed. Plan it again to run it.",
+		"2 not started",
+	} {
+		if !strings.Contains(text, want) {
+			t.Errorf("the page lacks %q in: %s", want, text)
+		}
+	}
+	if n := strings.Count(body, `t-warn">Not started<`); n < 3 { // the transaction and two devices
+		t.Errorf("%d \"Not started\" badges in the warn tone, want the transaction and both devices", n)
+	}
+	if strings.Contains(body, "Retry failed") || strings.Contains(body, "/transactions/8/retry") || strings.Contains(body, "Log ·") {
+		t.Errorf("a batch that never started offers a Retry or a log: %s", text)
+	}
+	// Plan again opens the preview with the same devices and the same release, and no start time
+	form := between(body, `<form method="post" action="/tf/updates/preview"`, `</form>`)
+	for _, want := range []string{`name="id" value="1"`, `name="id" value="2"`, `name="release" value="16.1.0"`, `name="skip_backup" value="1"`, `Plan again…`} {
+		if !strings.Contains(form, want) {
+			t.Errorf("Plan again lacks %q in: %s", want, form)
+		}
+	}
+	if strings.Contains(form, "start_at") || strings.Contains(form, `name="when"`) {
+		t.Errorf("Plan again carries the old start time: %s", form)
+	}
+	// the retry itself is refused too: it would start the update at once
+	resp, rbody := e.do(t, "POST", "/transactions/8/retry", "admin", url.Values{})
+	if resp.StatusCode != http.StatusConflict || len(o.retryCalls) != 0 || !strings.Contains(plain(rbody), "Plan again") {
+		t.Errorf("retry of a not-started batch: %d, calls %v: %s", resp.StatusCode, o.retryCalls, plain(rbody))
+	}
+}
+
+// Why (#604): a plan that a person cancelled before its time is not an error and not a retry: it says who
+// cancelled it and when, and offers to plan it again.
+func TestCancelledBeforeStartTransactionPage(t *testing.T) {
+	e, _, jobs, _ := setupOTAAt(t, fixedClock{fri})
+	start := time.Date(2026, 11, 4, 3, 0, 0, 0, time.UTC)
+	at := time.Date(2026, 11, 3, 18, 40, 0, 0, time.UTC)
+	jobs.jobs = nil
+	for _, id := range []model.JobID{60, 61} {
+		j := schedJob(id, 7, model.DeviceID(id-59), model.JobCancelled, start)
+		j.CreatedBy, j.UpdatedAt = "olga", at
+		jobs.jobs = append(jobs.jobs, j)
+		jobs.events = map[model.JobID][]model.JobEvent{
+			60: {eventOf(60, at, model.JobScheduled, model.JobCancelled, "cancel", "cancelled by olga")},
+			61: {eventOf(61, at, model.JobScheduled, model.JobCancelled, "cancel", "cancelled by olga")},
+		}
+	}
+	_, body := e.do(t, "GET", "/transactions/7", "operator", nil)
+	text := plain(body)
+	if class, word := txnState(t, body); word != "Cancelled before start" || !strings.Contains(class, "t-neutral") {
+		t.Errorf("badge %q (%s), want Cancelled before start in the neutral tone", word, class)
+	}
+	for _, want := range []string{"planned by olga for Wed, Nov 4 at 03:00", "cancelled by olga", "2 cancelled", "Plan again…"} {
+		if !strings.Contains(text, want) {
+			t.Errorf("the page lacks %q in: %s", want, text)
+		}
+	}
+	if strings.Contains(body, "Retry failed") || strings.Contains(body, "/transactions/7/retry") || strings.Contains(text, "Not started") {
+		t.Errorf("a plan cancelled by a person offers a retry or reads Not started: %s", text)
+	}
+}
+
+// Why (#604): a plan that is half cancelled (one device by hand) is still a plan: the others are waiting.
+func TestHalfCancelledPlanIsStillScheduled(t *testing.T) {
+	e, _, jobs, _ := setupOTAAt(t, fixedClock{fri})
+	c := schedJob(71, 10, 2, model.JobCancelled, sat)
+	jobs.jobs = []model.Job{schedJob(70, 10, 1, model.JobScheduled, sat), c}
+	_, body := e.do(t, "GET", "/transactions", "operator", nil)
+	if text := plain(body); !strings.Contains(text, "Scheduled · 1") || !strings.Contains(text, "TX-0010 Update to Tasmota 16.1.0 1 device Starts") {
+		t.Errorf("the plan with one device left is not in the Scheduled section: %s", text)
+	}
+	if n := strings.Count(body, "TX-0010"); n > 4 { // id link, title link, cancel title, aria-label: once in History would add more
+		t.Errorf("TX-0010 is listed twice (%d mentions)", n)
+	}
+}
+
+// Why (#604, #603): the engine marks a device that was busy for the whole late-start window, or excluded from
+// updates after the plan, with the event guard_refused. Drawn in red as "Guard refused" it reads like a safety
+// stop of the firmware check, which it is not: say what happened.
+func TestGuardRefusedAtAScheduledStartIsWordedForWhatItIs(t *testing.T) {
+	e, _, jobs, _ := setupOTAAt(t, fixedClock{fri})
+	busy := "the device was not free from the planned start (Sat, Nov 7 at 03:00) until 60 minutes after it, so the update was not started: another job holds the device"
+	excluded := "excluded from OTA since the update was planned; it was not started"
+	for _, c := range []struct{ detail, want string }{
+		{busy, "Device was busy"},
+		{excluded, "Excluded from updates since the plan"},
+	} {
+		j := schedJob(80, 10, 1, model.JobFailed, sat)
+		j.LastError, j.UpdatedAt = c.detail, sat.Add(61*time.Minute)
+		jobs.jobs = []model.Job{j}
+		jobs.events = map[model.JobID][]model.JobEvent{80: {eventOf(80, sat.Add(61*time.Minute), model.JobScheduled, model.JobFailed, "guard_refused", c.detail)}}
+		_, body := e.do(t, "GET", "/transactions/10", "operator", nil)
+		text := plain(body)
+		if !strings.Contains(text, c.want) || strings.Contains(text, "Guard refused") {
+			t.Errorf("%q: the log reads: %s", c.want, text)
+		}
+	}
+	// the firmware check's own refusal keeps its name
+	j := schedJob(81, 11, 1, model.JobFailed, time.Time{})
+	jobs.jobs = []model.Job{j}
+	jobs.events = map[model.JobID][]model.JobEvent{81: {eventOf(81, fri, model.JobPreflight, model.JobFailed, "guard_refused", "family mismatch")}}
+	if _, body := e.do(t, "GET", "/transactions/11", "operator", nil); !strings.Contains(plain(body), "Guard refused") {
+		t.Errorf("the refusal of the firmware check lost its name: %s", plain(body))
+	}
+}
+
+// Why (#604): until its start a plan holds its device against other TasmoFleet jobs, but the device stays
+// usable (console, power, settings). Nothing on the device page may say "being updated" or switch the tabs off.
+func TestADeviceWithAPlannedUpdateStaysUsable(t *testing.T) {
+	e, _, jobs, _ := setupOTAAt(t, fixedClock{fri})
+	jobs.jobs = []model.Job{schedJob(20, 10, 1, model.JobScheduled, sat)}
+	_, body := e.do(t, "GET", "/devices/1", "admin", nil)
+	if strings.Contains(body, "Unavailable while") || strings.Contains(body, "is being updated") {
+		t.Errorf("a planned update blocks the device page: %s", body)
+	}
+}
+
+// Why (#604): the picker disables a device the engine would refuse; a device with a plan is refused, and the
+// picker says which plan, so it does not read like a bug.
+func TestPickerNamesThePlanThatHoldsADevice(t *testing.T) {
+	e, _, jobs, _ := setupOTAAt(t, fixedClock{fri})
+	jobs.jobs = []model.Job{schedJob(20, 10, 1, model.JobScheduled, sat)}
+	_, body := e.do(t, "GET", "/updates/new", "operator", nil)
+	if !strings.Contains(body, `aria-label="Select kitchen" disabled`) || !strings.Contains(plain(body), "Planned in TX-0010") {
+		t.Errorf("the device with a plan is selectable or unexplained: %s", body)
+	}
+}
+
+// Why (#604): "Make compliant" is one of the TasmoFleet jobs a plan keeps off its device. The fix page lists
+// the device as planned, with the transaction, instead of offering a change that would be refused.
+func TestPolicyFixShowsADeviceWithAPlannedUpdateAsPlanned(t *testing.T) {
+	fix := &fakeFix{}
+	e := fixEnv(t, fix, &fakeJobs{jobs: []model.Job{schedJob(20, 10, 1, model.JobScheduled, sat)}})
+	body := previewFor(t, e, url.Values{"all": {"1"}})
+	if !strings.Contains(plain(body), "Planned: update TX-0010 starts Sat, Nov 7 at 03:00") || strings.Contains(body, "is running on this device") {
+		t.Fatalf("preview %s", plain(body))
+	}
+}
+
+// Why (#604): the Dashboard and the status bar do not list plans in 0.36.0 (#707), and a plan must not appear
+// there as a running transaction either.
+func TestDashboardAndStatusBarSayNothingOfAPlan(t *testing.T) {
+	e := setupWith(t, func(d *Deps) {
+		d.Clock = fixedClock{fri}
+		d.Jobs = &fakeJobs{jobs: []model.Job{schedJob(20, 10, 1, model.JobScheduled, sat)}}
+	})
+	_, body := e.do(t, "GET", "/", "operator", nil)
+	if strings.Contains(body, "TX-0010") || strings.Contains(body, ">Running<") {
+		t.Errorf("the Dashboard shows the plan: %s", between(body, `<h2>Update transactions</h2>`, `</section>`))
+	}
+	if sb := between(body, `class="sbar`, `</footer>`); strings.Contains(sb, "TX-0010") || strings.Contains(sb, "updating") {
+		t.Errorf("the status bar shows the plan: %s", sb)
+	}
+}
+
+// Why (#604): the About page counts jobs at work; a plan is not at work, not even if a list that includes it
+// is handed over. It must never read "running".
+func TestAboutDoesNotCountAPlanAsRunning(t *testing.T) {
+	c := jobsComp([]model.Job{schedJob(20, 10, 1, model.JobScheduled, sat)}, nil)
+	if c.Detail != "Idle" || strings.Contains(c.Detail, "running") {
+		t.Errorf("Background jobs reads %q with only a plan", c.Detail)
+	}
+	c = jobsComp([]model.Job{schedJob(20, 10, 1, model.JobScheduled, sat), schedJob(21, 11, 2, model.JobPreflight, time.Time{}), schedJob(22, 11, 3, model.JobQueued, time.Time{})}, nil)
+	if c.Detail != "1 job running · 1 job queued" {
+		t.Errorf("Background jobs reads %q, want the plan left out", c.Detail)
+	}
+}
+
+// Why (#604): a bulk result row words a job by its state; a plan is "Planned", never "Running".
+func TestBulkResultRowDoesNotCallAPlanRunning(t *testing.T) {
+	e, _, jobs, _ := setupOTAAt(t, fixedClock{fri})
+	h := &handler{d: Deps{Jobs: jobs, Inventory: e.inv}, log: slog.Default()}
+	var rv bulkResultView
+	row := h.jobResultRow(httptest.NewRequest(http.MethodGet, "/", nil), jobView{Job: schedJob(20, 10, 1, model.JobScheduled, sat)}, &rv)
+	if row.Label != "Planned" {
+		t.Errorf("a plan is labelled %q in a bulk result", row.Label)
+	}
+}
+
+// Why (#604, #466): a delete under a plan makes the store refuse after "Delete the backups too" has run.
+// The pre-check names the plan and its start, and nothing is deleted.
+func TestDeletingADeviceWithAPlannedUpdateIsRefusedBeforeAnyBackupGoes(t *testing.T) {
+	e, k := busyEnv(t, []model.Job{schedJob(20, 10, 1, model.JobScheduled, sat)}, nil)
+	_, body := e.do(t, "GET", "/devices/1/delete", "admin", nil)
+	text := plain(body)
+	if !strings.Contains(text, "TX-0010") || !strings.Contains(text, "Sat, Nov 7 at 03:00") || !strings.Contains(text, "planned") || !strings.Contains(body, `href="/tf/transactions/10"`) {
+		t.Fatalf("the delete page does not name the plan and its start:\n%.1800s", text)
+	}
+	if b := deleteButton.FindString(body); !strings.Contains(b, "disabled") {
+		t.Errorf("Delete device stays enabled: %q", b)
+	}
+	resp, rbody := e.do(t, "POST", "/devices/1/delete", "admin", url.Values{"backups": {"delete"}, "ack": {"1"}})
+	if resp.StatusCode != http.StatusConflict || !strings.Contains(plain(rbody), "TX-0010") {
+		t.Fatalf("status %d: %.800s", resp.StatusCode, plain(rbody))
+	}
+	if len(k.all) != 0 {
+		t.Fatalf("the backups were deleted (%v) although the device stayed", k.all)
+	}
+	if _, err := e.inv.Get(t.Context(), 1); err != nil {
+		t.Fatal("the refused delete removed the device")
+	}
+}

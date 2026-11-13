@@ -74,13 +74,16 @@ func jobsComp(jobs []model.Job, err error) aboutComp {
 	if err != nil {
 		return aboutComp{Name: "Background jobs", Detail: "Not readable · see the server log", State: "Failing", Tone: "danger"}
 	}
-	queued := 0
+	queued, planned := 0, 0
 	for _, j := range jobs {
-		if j.State == model.JobQueued {
+		switch j.State { //nolint:exhaustive // every other state counts as running
+		case model.JobQueued:
 			queued++
+		case model.JobScheduled:
+			planned++ // waits for its start (#604): neither queued nor running
 		}
 	}
-	running := len(jobs) - queued
+	running := len(jobs) - queued - planned
 	if running == 0 && queued == 0 {
 		return aboutComp{Name: "Background jobs", Detail: "Idle", State: "Healthy", Tone: "ok"}
 	}

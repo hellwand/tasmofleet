@@ -3,6 +3,7 @@ package web
 import (
 	"fmt"
 	"net/http"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -103,6 +104,8 @@ func (h *handler) dashboard(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		txs = groupTransactions(jobs)
+		// A plan is listed in Transactions only (#604); the Dashboard shows it with #707.
+		txs = slices.DeleteFunc(txs, func(t txView) bool { return t.Planned > 0 && t.Running+t.Queued == 0 })
 	}
 	var props []discovery.Proposal
 	if s.HasDiscovery {
@@ -366,7 +369,7 @@ func dashTxnCard(base string, t txView) ui.TxnData {
 	for _, x := range []struct {
 		n    int
 		word string
-	}{{t.Failed, "failed"}, {t.Canceled, "cancelled"}, {t.Running, "in progress"}, {t.Queued, "waiting"}} {
+	}{{t.Failed, "failed"}, {t.Canceled, "cancelled"}, {t.Running, "in progress"}, {t.Queued, "waiting"}, {t.Planned, "planned"}} {
 		if x.n > 0 {
 			parts = append(parts, fmt.Sprintf("%d %s", x.n, x.word))
 		}
@@ -387,6 +390,8 @@ func dashResult(t txView) (string, ui.Tone) {
 		return "Running", ui.ToneAccent
 	case t.Done == t.Total:
 		return "Completed", ui.ToneOK
+	case t.NotStarted > 0 && t.NotStarted+t.Early == t.Total:
+		return "Not started", ui.ToneWarn
 	case t.Canceled == t.Total:
 		return "Cancelled", ui.ToneNeutral
 	case t.Done == 0 && t.Canceled == 0:

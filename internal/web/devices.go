@@ -400,7 +400,7 @@ func (h *handler) deviceState(r *http.Request, d model.Device) (model.Health, *m
 			h.log.WarnContext(r.Context(), "device state: jobs unavailable", "err", err)
 		}
 		for i := range jobs {
-			if running == nil && !jobs[i].State.Terminal() {
+			if running == nil && holdsDevice(jobs[i]) { // a plan holds the device against other jobs, not against the person
 				running = &jobs[i]
 			}
 		}

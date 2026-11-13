@@ -30,6 +30,11 @@ var (
 	StampClockOrDay = StampFmt{"clock-day", ""}
 	// StampLog is a log column: 24-hour with seconds in any locale (time.js "clock-24").
 	StampLog = StampFmt{"clock-24", "15:04:05"}
+	// The start of a scheduled update (#604): "Sat 03:00", its date "Nov 7", and the sentence form "Sat, Nov 7 at 03:00".
+	// The fallbacks are in English; time.js writes the browser's locale.
+	StampWeekdayTime = StampFmt{"weekday-time", "Mon 15:04"}
+	StampMonthDay    = StampFmt{"month-day", "Jan 2"}
+	StampStart       = StampFmt{"start", "Mon, Jan 2 at 15:04"}
 	// StampTitle changes only the title of the element (full date, time and zone), not its text:
 	// for a <time> whose text is relative ("5 min ago") or already worded.
 	StampTitle = StampFmt{"title", "2006-01-02 15:04:05 MST"}

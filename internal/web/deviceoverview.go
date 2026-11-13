@@ -523,7 +523,7 @@ func (h *handler) overviewOf(r *http.Request, v view, d model.Device, just *rela
 	}
 	p.Activity = devActivity{Base: v.Base, Rows: rows, All: v.Base + devPath(d.ID, "/history"), Sig: activitySig(rows)}
 	for _, j := range jobs {
-		if !j.State.Terminal() {
+		if holdsDevice(j) {
 			// During an update the device stops answering (it downloads, then reboots). That is
 			// expected, not a failure, so the page says so instead of offering commands.
 			uv := jobView{Job: j, Base: v.Base}

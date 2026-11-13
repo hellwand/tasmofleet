@@ -52,7 +52,7 @@ func holdBanner(h *deviceHold) ui.BannerData {
 }
 
 // deviceHeld says what holds the device, if anything: an unfinished job of the update engine
-// (updates, commands, backups, policy runs) or an unfinished restore. The store enforces the same
+// (updates, commands, backups, policy runs), an update planned for later or an unfinished restore. The store enforces the same
 // rule atomically (store.ErrDeviceBusy); this look comes first so the page can say why and, above
 // all, so "Delete the backups too" has not run when the delete is then refused.
 func (h *handler) deviceHeld(ctx context.Context, id model.DeviceID) (*deviceHold, error) {
@@ -70,6 +70,14 @@ func (h *handler) deviceHeld(ctx context.Context, id model.DeviceID) (*deviceHol
 			}
 			return &deviceHold{Text: text, LinkText: "Open transaction #" + no, Href: "/transactions/" + no}, nil
 		}
+	}
+	// A plan holds the device too: the store refuses the delete on its scheduled row, after "Delete the backups too"
+	// has gone, so it is looked for here, with its own query (activeJobStates stay without scheduled jobs).
+	if j, ok, err := h.plannedOn(ctx, id); err != nil {
+		return nil, err
+	} else if ok {
+		no := strconv.FormatInt(int64(j.BatchID), 10)
+		return &deviceHold{Text: "An update is planned for this device (" + planStartText(j) + "). Cancel the plan, then delete the device.", LinkText: "Open transaction #" + no, Href: "/transactions/" + no}, nil
 	}
 	if h.d.Restore != nil {
 		list, err := h.d.Restore.List(ctx, id, 5)

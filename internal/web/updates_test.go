@@ -69,6 +69,8 @@ type fakeJobs struct {
 	getErr  error
 	// filters records every filter ListJobs was asked with.
 	filters []store.JobFilter
+	// events are the persisted events per job; a job without an entry has one "upgrade_issued" event.
+	events map[model.JobID][]model.JobEvent
 }
 
 func (f *fakeJobs) ListJobs(_ context.Context, fl store.JobFilter) ([]model.Job, error) {
@@ -102,7 +104,10 @@ func (f *fakeJobs) ListJobs(_ context.Context, fl store.JobFilter) ([]model.Job,
 	}
 	return out, nil
 }
-func (f *fakeJobs) JobEvents(context.Context, model.JobID) ([]model.JobEvent, error) {
+func (f *fakeJobs) JobEvents(_ context.Context, id model.JobID) ([]model.JobEvent, error) {
+	if evs, ok := f.events[id]; ok {
+		return evs, nil
+	}
 	return []model.JobEvent{{Event: "upgrade_issued", Detail: "ok"}}, nil
 }
 func (f *fakeJobs) GetJob(_ context.Context, id model.JobID) (model.Job, error) {

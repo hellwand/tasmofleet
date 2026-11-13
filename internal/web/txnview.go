@@ -266,9 +266,12 @@ func joinComma(s []string) string { return strings.Join(s, ", ") }
 // txListView is the Updates page: the running transactions as cards, then every transaction.
 type txListView struct {
 	Base     string
-	CanStart bool // updates are switched on
+	CSRF     string // the Cancel dialog of a plan
+	CanStart bool   // updates are switched on
 	Running  []ui.TxnData
 	History  []txHistRow
+	// Scheduled are the plans that wait for their start, soonest first (#604).
+	Scheduled []txSchedRow
 	// Device is the name of the device the list is limited to ("" for the whole fleet); Self is
 	// the list's own address, so the live refresh keeps the filter.
 	Device, Self string
@@ -278,6 +281,10 @@ type txListView struct {
 type txHistRow struct {
 	ID, Title, Devices, Result, By, When, At, Href string
 	Tone                                           ui.Tone
+	// A planned update's "when" (#604): WhenLabel ("was due ") is written before the time and Suffix ("· scheduled")
+	// after it; Due, when set, is the planned start, shown instead of the creation time.
+	WhenLabel, Suffix string
+	Due               time.Time
 }
 
 // txnPage is one transaction: header, progress, then its devices with the open log, or for a
@@ -290,6 +297,12 @@ type txnPage struct {
 	StateTone           ui.Tone
 	Policy              bool
 	Active              bool
+	// A planned update (#604): Sched is its story (nil for every other transaction), Waiting says that nothing of it
+	// has run yet and it waits for its start, NeverRan that nothing of it ever will (not started, cancelled).
+	Sched    *txnSched
+	Waiting  bool
+	NeverRan bool
+	Planned  int // devices that wait for their start
 
 	Bar                                                           ui.TxnData
 	Total, Done, Running, Queued, Failed, Canceled, CancelPending int

@@ -198,6 +198,16 @@ func eventText(e model.JobEvent, j model.Job, pr *principalDir, minimal bool) st
 			return t
 		}
 	}
+	switch {
+	case e.Event == "start_due":
+		return startedText(e, j) // a scheduled job reached its start (#604)
+	case e.Event == "not_started":
+		return "Not started: " + e.Detail // TasmoFleet was down for the whole late-start window
+	case e.Event == "guard_refused" && e.From == model.JobScheduled:
+		if t, ok := scheduledRefusalText(e.Detail); ok {
+			return t // the device, not the firmware check, said no at the start
+		}
+	}
 	if who, ok := strings.CutPrefix(e.Detail, "cancelled by "); ok && e.Event == "cancel" {
 		who = pr.Text(who) // a person's name, never the id
 		// not "Cancel cancelled by adam": the event and its detail said the same thing

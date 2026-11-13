@@ -164,6 +164,19 @@ func (h *handler) batchCancelConfirm(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "transaction is not running", http.StatusConflict)
 		return
 	}
+	if p.Planned > 0 && p.Running+p.Queued+p.Done == 0 { // a plan that has not started: nothing runs, nothing changes
+		first := p.Jobs[0].Job
+		h.renderActionConfirm(w, r, "transactions", actionConfirm{
+			Title:   "Cancel " + txID(p.Batch) + "?",
+			Heading: "Cancel schedule",
+			Text:    planCancelText(txTitle(first, p.Total)+" ("+plural(p.Total, "device")+")", first.StartAt),
+			Crumbs:  []confirmLink{{"/transactions", "Transactions"}, {back, txID(p.Batch)}},
+			Last:    "Cancel",
+			Action:  back + "/cancel", Verb: "Cancel schedule",
+			CancelHref: back, CancelLabel: "Keep schedule",
+		})
+		return
+	}
 	// the same words as the page's dialog (txnBody)
 	h.renderActionConfirm(w, r, "transactions", actionConfirm{
 		Title:   "Cancel " + txID(p.Batch) + "?",
@@ -203,6 +216,18 @@ func (h *handler) jobCancelConfirm(w http.ResponseWriter, r *http.Request) {
 		name = d.Name
 	}
 	back := "/transactions/" + strconv.FormatInt(int64(j.BatchID), 10)
+	if j.State == model.JobScheduled {
+		h.renderActionConfirm(w, r, "transactions", actionConfirm{
+			Title:   "Cancel the update of " + name + "?",
+			Heading: "Cancel update",
+			Text:    planCancelText("The update of "+name, j.StartAt),
+			Crumbs:  []confirmLink{{"/transactions", "Transactions"}, {back, txID(j.BatchID)}},
+			Last:    "Cancel update",
+			Action:  fmt.Sprintf("/jobs/%d/cancel", j.ID), Verb: "Cancel update",
+			CancelHref: back, CancelLabel: "Keep schedule",
+		})
+		return
+	}
 	h.renderActionConfirm(w, r, "transactions", actionConfirm{
 		Title:   "Cancel the update of " + name + "?",
 		Heading: "Cancel update",

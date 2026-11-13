@@ -23,6 +23,7 @@ templ transactionsPage(p txListView) {
 	<div hx-get={ p.Self } hx-trigger="sse:job throttle:2s" hx-select="#txlist" hx-target="#txlist" hx-swap="outerHTML">
 		@txList(p)
 	</div>
+	@txnDialog(p.CSRF)
 }
 
 func txListTitle(p txListView) string {
@@ -41,7 +42,7 @@ func txListSub(p txListView) string {
 
 templ txList(p txListView) {
 	<div id="txlist" class="upd">
-		if len(p.History) == 0 {
+		if len(p.History) == 0 && len(p.Scheduled) == 0 {
 			<section class="ucard">
 				@ui.Empty("No transactions yet", "Updates you start show up here.") {
 					if p.CanStart {
@@ -55,6 +56,40 @@ templ txList(p txListView) {
 					@ui.TxnCard(t)
 				</div>
 			}
+			if len(p.Scheduled) > 0 {
+				<section class="ulist upd-sched" aria-labelledby="sched-h">
+					<div class="ulist-head"><h2 id="sched-h">Scheduled · { strconv.Itoa(len(p.Scheduled)) }</h2></div>
+					<div class="upd-hhead upd-shead" aria-hidden="true"><span>ID</span><span>What</span><span>Devices</span><span>Planned start</span><span></span></div>
+					for _, s := range p.Scheduled {
+						<div class="upd-hrow upd-srow">
+							<a class="upd-hid" href={ templ.SafeURL(s.Href) }>{ s.ID }</a>
+							<a class="upd-htitle" href={ templ.SafeURL(s.Href) }>{ s.Title }</a>
+							<span class="upd-hn">{ s.Devices }</span>
+							<span class="upd-sstart">
+								<span>Starts <b><time { ui.StampAttrs(s.Start, ui.StampWeekdayTime)... }>{ ui.StampText(s.Start, ui.StampWeekdayTime) }</time></b></span>
+								<small><time { ui.StampAttrs(s.Start, ui.StampMonthDay)... }>{ ui.StampText(s.Start, ui.StampMonthDay) }</time> · { s.In } · { s.By }</small>
+							</span>
+							<span class="upd-sact">
+								<a
+									class="btn btn-sm"
+									href={ templ.SafeURL(s.CancelHref) }
+									data-dialog="dlg-txn"
+									data-dlg-title={ "Cancel " + s.ID + "?" }
+									data-dlg-text={ s.CancelText }
+									data-dlg-at={ ui.StampISO(s.Start) }
+									data-dlg-ts={ ui.StampStart.Key }
+									data-dlg-shown={ ui.StampText(s.Start, ui.StampStart) }
+									data-dlg-action={ s.CancelHref }
+									data-dlg-verb="Cancel schedule"
+									data-dlg-dismiss="Keep schedule"
+									aria-label={ "Cancel " + s.ID }
+								>Cancel</a>
+							</span>
+						</div>
+					}
+				</section>
+			}
+			if len(p.History) > 0 {
 			<section class="ulist upd-hist" aria-labelledby="hist-h">
 				<div class="ulist-head"><h2 id="hist-h">History</h2></div>
 				<div class="upd-hhead" aria-hidden="true"><span>ID</span><span>What</span><span>Devices</span><span>Result</span><span>Started by</span></div>
@@ -66,10 +101,11 @@ templ txList(p txListView) {
 						<span class="upd-hst">
 							@ui.Badge(h.Tone, h.Result)
 						</span>
-						<span class="upd-hwho">{ h.By } · <time datetime={ h.At } data-ts={ ui.StampDay.Key }>{ h.When }</time></span>
+						<span class="upd-hwho">{ h.By } · { h.WhenLabel }<time datetime={ h.At } data-ts={ ui.StampDay.Key }>{ h.When }</time>{ h.Suffix }</span>
 					</a>
 				}
 			</section>
+			}
 		}
 	</div>
 }
@@ -102,7 +138,7 @@ templ txnDialog(csrf string) {
 }
 
 templ txnBody(p txnPage) {
-	if p.Active {
+	if p.Active && !p.Waiting {
 		<span hidden hx-get={ p.LiveURL } hx-trigger="every 3s" hx-target="#txn" hx-swap="innerHTML"></span>
 	}
 	<div class="pghead upd-head">
@@ -111,7 +147,9 @@ templ txnBody(p txnPage) {
 				<h1>{ p.Title }</h1>
 				<span id="txn-state" class={ "bdg", "bdg-lg", "t-" + string(p.StateTone) }>{ p.State }</span>
 			</div>
-			if p.Template {
+			if p.Sched != nil {
+				<p class="pghead-sub"><span class="mono" data-visual-mask>{ p.ID }</span> · @schedSub(p.Sched)</p>
+			} else if p.Template {
 				<p class="pghead-sub"><span class="mono" data-visual-mask>{ p.ID }</span> · { p.SubPre }<time { ui.StampAttrs(p.SubAt, ui.StampShort)... }>{ ui.StampText(p.SubAt, ui.StampShort) }</time>{ p.SubPost }</p>
 			} else {
 				<p class="pghead-sub"><span class="mono" data-visual-mask>{ p.ID }</span> · { p.Sub }</p>
@@ -141,7 +179,22 @@ templ txnBody(p txnPage) {
 					<a class="btn" href={ templ.SafeURL(p.Base + "/transactions/" + bid(p.Batch) + "/retry") }>Retry failed ({ strconv.Itoa(p.RetryN) })</a>
 				}
 			}
-			if p.Active {
+			if p.Sched != nil && p.Sched.Kind == "waiting" {
+				<a
+					class="btn"
+					href={ templ.SafeURL(p.Base + "/transactions/" + bid(p.Batch) + "/cancel") }
+					data-dialog="dlg-txn"
+					data-dlg-title={ "Cancel " + p.ID + "?" }
+					data-dlg-text={ p.Sched.CancelText }
+					data-dlg-at={ ui.StampISO(p.Sched.Start) }
+					data-dlg-ts={ ui.StampStart.Key }
+					data-dlg-shown={ ui.StampText(p.Sched.Start, ui.StampStart) }
+					data-dlg-action={ p.Base + "/transactions/" + bid(p.Batch) + "/cancel" }
+					data-dlg-verb="Cancel schedule"
+					data-dlg-dismiss="Keep schedule"
+					aria-label={ "Cancel " + p.ID }
+				>Cancel</a>
+			} else if p.Active {
 				<a
 					class="btn"
 					href={ templ.SafeURL(p.Base + "/transactions/" + bid(p.Batch) + "/cancel") }
@@ -152,6 +205,15 @@ templ txnBody(p txnPage) {
 					data-dlg-verb="Cancel remaining"
 					data-dlg-dismiss="Keep running"
 				>Cancel remaining</a>
+			}
+			if p.Sched != nil && p.Sched.Again != nil {
+				<form method="post" action={ templ.SafeURL(p.Base + p.Sched.Again.Action) } class="pol-inline">
+					<input type="hidden" name="csrf" value={ p.CSRF }/>
+					for _, f := range p.Sched.Again.Fields {
+						<input type="hidden" name={ f.Key } value={ f.Value }/>
+					}
+					<button type="submit" class={ "btn", templ.KV("btn-primary", p.Sched.Kind == "notstarted") }>Plan again…</button>
+				</form>
 			}
 			if p.CheckAgain != nil && len(p.CheckAgain.Fields) > 0 {
 				<form method="post" action={ templ.SafeURL(p.Base + p.CheckAgain.Action) } class="pol-inline">
@@ -171,35 +233,81 @@ templ txnBody(p txnPage) {
 			}
 		</div>
 	</div>
-	<section id="batch-summary" class="ucard upd-prog" aria-label="Progress">
-		@ui.SegBar(p.Bar)
-		<div class="upd-counts" role="status">
-			if p.Policy || p.Template {
-				<span><b>{ strconv.Itoa(p.Done) }</b> applied</span>
-				<span><b class="upd-bad">{ strconv.Itoa(p.Failed) }</b> failed</span>
-				if p.Running > 0 {
-					<span><b>{ strconv.Itoa(p.Running) }</b> in progress</span>
-				}
-				if p.Queued > 0 {
-					<span><b>{ strconv.Itoa(p.Queued) }</b> queued</span>
-				}
-			} else {
-				<span><b>{ strconv.Itoa(p.Done) }</b> done</span>
-				<span><b>{ strconv.Itoa(p.Running) }</b> in progress</span>
-				<span><b>{ strconv.Itoa(p.Queued) }</b> queued</span>
-				<span><b class="upd-bad">{ strconv.Itoa(p.Failed) }</b> failed</span>
-			}
-			if p.Canceled > 0 && p.Template {
-				<span><b>{ strconv.Itoa(p.Canceled) }</b> stopped</span>
-			} else if p.Canceled > 0 {
-				<span><b>{ strconv.Itoa(p.Canceled) }</b> cancelled</span>
-			}
-			if p.CancelPending > 0 {
-				<span><b>{ strconv.Itoa(p.CancelPending) }</b> cancel requested</span>
-			}
-			<span class="upd-of">of { strconv.Itoa(p.Total) }</span>
+	if p.Sched != nil && p.Sched.Kind == "notstarted" {
+		<div class="banner tone-warn" role="status">
+			<span class="banner-dot"></span>
+			<div class="banner-text">
+				<b>Not started.</b>
+				TasmoFleet was down at the planned start (<time { ui.StampAttrs(p.Sched.Start, ui.StampStart)... }>{ ui.StampText(p.Sched.Start, ui.StampStart) }</time>) and was not back within { strconv.Itoa(p.Sched.Minutes) } minutes. It came back at <time { ui.StampAttrs(p.Sched.BackAt, p.Sched.BackFmt())... }>{ ui.StampText(p.Sched.BackAt, p.Sched.BackFmt()) }</time>. No device was changed, and this update will not start later.
+			</div>
 		</div>
-	</section>
+	}
+	if p.Sched != nil && p.Sched.Kind == "waiting" {
+		@schedWhen(p.Sched)
+	}
+	if !p.Waiting || p.Failed > 0 {
+		<section id="batch-summary" class="ucard upd-prog" aria-label="Progress">
+			@ui.SegBar(p.Bar)
+			<div class="upd-counts" role="status">
+				if p.NeverRan && p.Sched != nil && p.Sched.Kind == "notstarted" {
+					<span><b>{ strconv.Itoa(p.Total) }</b> not started</span>
+				} else if p.NeverRan {
+					<span><b>{ strconv.Itoa(p.Total) }</b> cancelled</span>
+				} else {
+					if p.Policy || p.Template {
+						<span><b>{ strconv.Itoa(p.Done) }</b> applied</span>
+						<span><b class="upd-bad">{ strconv.Itoa(p.Failed) }</b> failed</span>
+						if p.Running > 0 {
+							<span><b>{ strconv.Itoa(p.Running) }</b> in progress</span>
+						}
+						if p.Queued > 0 {
+							<span><b>{ strconv.Itoa(p.Queued) }</b> queued</span>
+						}
+					} else {
+						<span><b>{ strconv.Itoa(p.Done) }</b> done</span>
+						<span><b>{ strconv.Itoa(p.Running) }</b> in progress</span>
+						<span><b>{ strconv.Itoa(p.Queued) }</b> queued</span>
+						<span><b class="upd-bad">{ strconv.Itoa(p.Failed) }</b> failed</span>
+					}
+					if p.Planned > 0 {
+						<span><b>{ strconv.Itoa(p.Planned) }</b> planned</span>
+					}
+					if p.Canceled > 0 && p.Template {
+						<span><b>{ strconv.Itoa(p.Canceled) }</b> stopped</span>
+					} else if p.Canceled > 0 {
+						<span><b>{ strconv.Itoa(p.Canceled) }</b> cancelled</span>
+					}
+					if p.CancelPending > 0 {
+						<span><b>{ strconv.Itoa(p.CancelPending) }</b> cancel requested</span>
+					}
+				}
+				<span class="upd-of">of { strconv.Itoa(p.Total) }</span>
+			</div>
+			if p.Sched != nil && p.Sched.Kind == "ran" && !p.Sched.Started.IsZero() {
+				<p class="upd-prog-note">
+					if p.Sched.Instant() {
+						Started on time, at the planned <time { ui.StampAttrs(p.Sched.Start, ui.StampClock)... }>{ ui.StampText(p.Sched.Start, ui.StampClock) }</time>.
+					} else if p.Sched.OnTime() {
+						Started on time, { p.Sched.LateText() } after the planned <time { ui.StampAttrs(p.Sched.Start, ui.StampClock)... }>{ ui.StampText(p.Sched.Start, ui.StampClock) }</time>.
+					} else {
+						Started { p.Sched.LateText() } after the planned <time { ui.StampAttrs(p.Sched.Start, ui.StampClock)... }>{ ui.StampText(p.Sched.Start, ui.StampClock) }</time>, within the { strconv.Itoa(p.Sched.Minutes) } minutes a late start is allowed.
+					}
+				</p>
+			}
+		</section>
+	}
+	if p.Sched != nil && p.Sched.Kind == "notstarted" {
+		<section class="ucard upd-prog" aria-labelledby="notif-h">
+			<div class="upd-when-card">
+				<h2 id="notif-h">Notification</h2>
+				<div class="upd-notif">
+					<b>{ p.Sched.NoticeTitle }</b>
+					<p>{ p.Sched.Notice }</p>
+					<small>Sent once TasmoFleet was back, <time { ui.StampAttrs(p.Sched.BackAt, ui.StampDay)... }>{ ui.StampDayText(p.Sched.BackAt, p.Sched.BackAt) }</time>, when "Update job finished" is switched on in System, Notifications.</small>
+				</div>
+			</div>
+		</section>
+	}
 	if p.Template {
 		<div class="gt-txn">
 			@ui.CardStacks(3) {
@@ -233,7 +341,7 @@ templ txnBody(p txnPage) {
 			}
 		</div>
 	} else {
-		<div class="upd-cols">
+		<div class={ "upd-cols", templ.KV("upd-cols-one", p.Waiting || p.NeverRan) }>
 			<section class="upd-rows" aria-label="Devices">
 				for _, r := range p.Rows {
 					<a class="upd-row" href={ templ.SafeURL(r.Href) } id={ "job-" + strconv.FormatInt(int64(r.JobID), 10) } if r.Selected {
@@ -294,6 +402,37 @@ templ txnBody(p txnPage) {
 			}
 		</div>
 	}
+}
+
+// schedSub is the sub line of a planned update's page: who planned it, for when, and how it went.
+templ schedSub(s *txnSched) {
+	switch s.Kind {
+		case "waiting":
+			planned by { s.Who }, <time { ui.StampAttrs(s.Created, ui.StampDay)... }>{ ui.StampDayText(s.Created, s.Created) }</time> · { s.Tail }
+		case "cancelled":
+			planned by { s.Who }{ " for " }<time { ui.StampAttrs(s.Start, ui.StampStart)... }>{ ui.StampText(s.Start, ui.StampStart) }</time>
+			if !s.CancelledAt.IsZero() {
+				· cancelled by { s.CancelledBy }, <time { ui.StampAttrs(s.CancelledAt, ui.StampDay)... }>{ ui.StampDayText(s.CancelledAt, s.CancelledAt) }</time>
+			}
+		default:
+			planned by { s.Who }{ " for " }<time { ui.StampAttrs(s.Start, ui.StampStart)... }>{ ui.StampText(s.Start, ui.StampStart) }</time>
+			if !s.Started.IsZero() {
+				· started <time { ui.StampAttrs(s.Started, ui.StampLog)... }>{ ui.StampText(s.Started, ui.StampLog) }</time>
+			}
+			· { s.Tail }
+	}
+}
+
+// schedWhen is the card of a plan that waits: its start, the rule for a start that TasmoFleet misses (the words of
+// the update preview) and what can be done until then.
+templ schedWhen(s *txnSched) {
+	<section class="ucard upd-prog" aria-label="When">
+		<div class="upd-when-card">
+			<p class="upd-when-big"><span>Starts <time { ui.StampAttrs(s.Start, ui.StampStart)... }>{ ui.StampText(s.Start, ui.StampStart) }</time></span> <small>· { s.In }</small></p>
+			<p class="upd-rule"><b>If TasmoFleet is down at <time { ui.StampAttrs(s.Start, ui.StampClock)... }>{ ui.StampText(s.Start, ui.StampClock) }</time>,</b> the update starts as soon as TasmoFleet is back, but only until <time { ui.StampAttrs(s.Deadline(), ui.StampClock)... }>{ ui.StampText(s.Deadline(), ui.StampClock) }</time> ({ strconv.Itoa(s.Minutes) } minutes after the start time). If TasmoFleet is back later than that, the update is not started at all and TasmoFleet sends a notification. Devices are checked again when the update starts.</p>
+		</div>
+		<p class="upd-prog-note">Until it starts you can cancel it here. A running update cannot be changed this way.</p>
+	</section>
 }
 
 // updateNewPage is /updates/new: 1 · Devices and 3 · Options in the wide stack, 2 · Release and the
