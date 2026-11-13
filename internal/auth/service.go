@@ -530,19 +530,7 @@ func (s *Service) require(min model.Role, allowMustChange bool) func(http.Handle
 				return
 			}
 			if ci.err != nil {
-				login := base + "/login?next=" + url.QueryEscape(httpx.LocalPath(r.URL.RequestURI()))
-				if errors.Is(ci.err, ErrSessionExpired) {
-					login += "&expired=1"
-				}
-				switch {
-				case r.Header.Get("HX-Request") != "":
-					w.Header().Set("HX-Redirect", login)
-					w.WriteHeader(http.StatusUnauthorized)
-				case r.Method == http.MethodGet:
-					http.Redirect(w, r, login, http.StatusSeeOther)
-				default:
-					http.Error(w, "not authenticated", http.StatusUnauthorized)
-				}
+				SignIn(w, r, ci.err)
 				return
 			}
 			if ci.mustChange && !allowMustChange {
@@ -572,6 +560,29 @@ func (s *Service) require(min model.Role, allowMustChange bool) func(http.Handle
 			}
 			next.ServeHTTP(w, r.WithContext(WithPrincipal(r.Context(), ci.p)))
 		})
+	}
+}
+
+// SignIn is Require's answer to a request without a valid principal (err is
+// what resolving it returned): browsers are sent to the sign-in page, which
+// leads back to r and says so when the session expired; HTMX gets 401 with
+// HX-Redirect, a GET a redirect, anything else a plain 401. It reads no body.
+// Package app answers an htmx request without a session with it before the
+// CSRF check, which would otherwise refuse it with a 403 that htmx swaps into
+// the page (#717).
+func SignIn(w http.ResponseWriter, r *http.Request, err error) {
+	login := httpx.BasePath(r.Context()) + "/login?next=" + url.QueryEscape(httpx.LocalPath(r.URL.RequestURI()))
+	if errors.Is(err, ErrSessionExpired) {
+		login += "&expired=1"
+	}
+	switch {
+	case r.Header.Get("HX-Request") != "":
+		w.Header().Set("HX-Redirect", login)
+		w.WriteHeader(http.StatusUnauthorized)
+	case r.Method == http.MethodGet:
+		http.Redirect(w, r, login, http.StatusSeeOther)
+	default:
+		http.Error(w, "not authenticated", http.StatusUnauthorized)
 	}
 }
 
