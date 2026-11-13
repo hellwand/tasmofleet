@@ -4,6 +4,48 @@ All notable changes. Breaking changes are marked **breaking**. tasmofleet has no
 compatibility shims (see CLAUDE.md), so read this before upgrading. Database migrations
 always upgrade automatically.
 
+## 0.35.0 "Bishop Rock" (2026-11-13)
+
+### Upgrade notes
+
+- Migration 0047 adds the table `id_high_water`, seeded with the highest device and transaction id that the database or the audit log knows, so the ids of devices and transactions deleted before the upgrade are not taken again either. Nothing to do. Ids that were already reused before the upgrade cannot be repaired: such a device or transaction keeps showing the older audit rows of its predecessor (#498).
+- The old container package `ghcr.io/nofuturekid/tasmofleet` will be deleted with 0.36.0. It stopped at 0.34.1; pull `ghcr.io/hellwand/tasmofleet` instead. The Docker Hub image `nofuturekid/tasmofleet` is not affected (#738)
+
+### Changed
+
+- The rule editor's hint for Latitude and Longitude now says that the value is compared to 4 decimals (so 48.2082 and 48.208200 are the same), gives the range, and that a whole number such as 48 means 48.0000, not a prefix (#382, thanks @Noschvie)
+- The tooltip table holds only the words a badge can show; unreachable entries, including the retired Warn wording, are gone (#516)
+- GPIO templates: the reference device of a group is always its first row, with its own Reference chip and a tinted row, whether it was chosen or is the most common layout; the other devices keep their id order (#547)
+- System, Snapshots now says that the times in the snapshot file names are UTC (the trailing Z), with an example, and the configuration and backup docs explain the same; the names themselves are unchanged (#683, thanks @Noschvie)
+- The message about a failed scheduled backup now lists each failed device with its hostname, address and the reason it failed, so you can tell from the message whether you need to act, and its link opens the failed devices on the Backups page (#685, thanks @Noschvie)
+- A failed Settings read of a device now writes one warning to the log with the device id, the query that failed and the reason as a short class (timeout, unreachable, auth and so on); the page text is unchanged and the line never holds a setting value or a credential (#712)
+- Start warning when a sign-in variable (`AUTH_MODE`, `PUBLIC_URL`, `OIDC_*`, `ADMIN_GROUPS`, `OPERATOR_GROUPS`, `OIDC_CLIENT_SECRET_FILE`) is set in the environment without the `TASMOFLEET_` prefix: such a variable was ignored without a word; the warning names the key that works, the value is still ignored and never logged (#721)
+
+### Fixed
+
+- A deleted device or a transaction removed by the retention (`AUDIT_RETENTION`) no longer frees its id for the next new one: a new device took the id of the newest deleted device and showed its console history and audit rows, and old links and notifications opened it; a new transaction could show another one's audit rows the same way. Ids only grow now (#498)
+- The style guide's Severity sample is built from the app's own severity control, so it no longer shows the stronger level (warn) as Advisory (#514)
+- The style guide page has one h1, one Breadcrumb landmark and unique ids: the samples of the page header, crumbs, error page and sign-in card draw their title and trail without the page-level identity (#515)
+- The backup age metric of a device no longer counts the safety backup of replacement hardware that "Replace device" files under it: it shows the device's own last backup, and a device with only such runs has no backup age sample (#545)
+- The one-time backup layout migration now treats a file system without directory fsync (vboxsf, some 9p and SMB mounts) like the backups themselves do: it updates the row in the same run instead of leaving the entry for the next start, and logs the limitation once per directory; real I/O errors still leave the entry (#548)
+- GPIO templates: the group cards no longer jump around when the devices are read again; the groups stay in the order of chip family and template name, and each card keeps its column, whatever a device answered, on a desktop, a tablet and a phone. The summary line and the row chips still show what differs (#549)
+- Health: a device on your broker that sends no telemetry no longer flips to Stale and back between its polls when `POLL_INTERVAL` is longer than about 9 minutes (at 15 minutes that wrote about 190 history rows a day, at 2 hours the device showed Stale most of the day), and a start no longer writes two history rows for each such device about 11 minutes later. A poll's answer, or its refused HTTP API, now counts until the next poll is due; a device the poll no longer reaches is Stale from that poll on (#669)
+- The Devices list on a phone shows every filter chip and picker without sideways scrolling: the chips wrap onto further lines, the filter field fills its whole line below 720 px, and the separator in front of the Chip and Tag pickers is hidden below 1120 px, where the row can wrap (#678)
+- The 24 h Wi-Fi sparkline of a device's Stability card fills the whole width of its column at every screen width instead of stopping at 240 px (#679)
+- The info icons of the Identity card's "Reported by the device" fields sit on their label's line instead of below it, and a tap on one opens its explanation (a tap elsewhere or on another icon closes it); on a phone the text could not be read before (#680)
+- CI: superseded Go caches no longer pile up on `main` and push the repository over the 10 GB cache limit. A job after `main.yml`, the nightly and the weekly run keeps the newest cache of each series (Go version and `go.sum` hash do not count) and deletes the rest (#692).
+- Policy reads of `OtaUrl`, `PowerRetain`, `LogHost` and `SwitchMode1` to `SwitchMode28` go over MQTT first like every other read, so a device that is online on the broker but whose HTTP does not answer can be checked against these rules; who may send them in the console is unchanged (#711, reported in #702, thanks @Noschvie)
+- Add devices: "Show ignored" now counts and lists a dismissed address change or conflict too, in its own section (Address changed or Conflicts) with an Ignored badge and Restore as its only action, and Restore puts it back there. Before, such a dismissal could not be undone: the count skipped it, and the device keeps announcing the same data, so the 30-day expiry never removed it (#714)
+- Discovery: a device whose `tasmota/discovery/<MAC>/config` message cannot be used (not JSON, no valid MAC or IP address, a MAC that differs from the topic) is now named in the log at the default level, once, with its MAC and the reason, never the message text; before, the debug line named neither. A broker reconnect that replays the same message does not write it again. MQTT messages that find the discovery queue full (discovery configs, LWT, STATE, INFO, Status 5 replies) are counted in `tasmofleet_discovery_proposals_dropped_total{kind="queue_full"}` (#715)
+- Audit log: the entries for ignoring and restoring a discovered device now say which device it was. The target shows its name and the number, the summary its kind and address, and the details its MAC; before, they only read "Discovered device #12". Older entries keep their text (#716)
+- A button that updates only part of a page (such as Test connection or a relay switch), pressed after the session expired (a tab left open past the idle limit), now leads to the sign-in page instead of putting the text "missing or invalid CSRF token" into the page in place of the row or card (#717)
+- Add devices: Ignore, Ignore selected and Restore now carry the version of the device the page showed and are refused with "The form is out of date. Reload the page and try again." when the number has since been given to another device. Before, a page left open could hide (or restore) a device that appeared after it was loaded and that nobody had seen, because the numbers of deleted rows are reused (#745)
+
+### Security
+
+- The hostname a device reports is now cleaned like the rest of its text before it is stored (control and invisible characters removed, at most 100 characters). Before, a device, or anything answering at its address, could store a hostname with line breaks, invisible or direction-changing characters, or of any length, which then showed on its pages. The hostname listed in the message about a failed scheduled backup is cleaned as well, also for hostnames stored by older versions (#747)
+- The Unicode line and paragraph separators (U+2028, U+2029) are now removed from device names and hostnames like the other control and invisible characters. Before, a name or hostname containing one was kept and could show as a second line in the message about a failed scheduled backup; discovered devices were affected in the same way (#755)
+
 ## 0.34.3 "Split Rock" (2026-11-12)
 
 ### Fixed
