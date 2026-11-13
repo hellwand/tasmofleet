@@ -981,7 +981,7 @@
         },
         "overrides": []
       },
-      "description": "Discovery proposals not stored because the proposal limit was reached (possible broker spam)."
+      "description": "Discovery proposals not stored because the proposal limit was reached, and MQTT messages discovery had no room for in its queue (kind queue_full: discovery configs, LWT, STATE, INFO, Status 5 replies). Possible broker spam."
     },
     {
       "id": 21,

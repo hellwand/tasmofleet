@@ -287,6 +287,7 @@ func (h *handler) auditLog(w http.ResponseWriter, r *http.Request) {
 		names := loadNames()
 		for _, e := range kept[lo:hi] {
 			text, href := auditTarget(e.Target, names, httpBase(r))
+			text = auditTargetWithName(e, text)
 			all := auditSummary(e)
 			p.Events = append(p.Events, auditRow{AuditEvent: e, TargetText: text, TargetHref: href, Label: auditLabel(e.Action),
 				Status: auditStatus(e), Summary: clip(all, auditSummaryMax), SummaryAll: all, Who: h.pr.Parts(e.Actor)})

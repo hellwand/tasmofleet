@@ -232,7 +232,9 @@ type Standard struct {
 	// (since process start if never); no labels.
 	FirmwareIndexAge *Vec
 	// DiscoveryDropped counts proposals not stored because the limit was
-	// reached ({kind}: new, address-change, conflict).
+	// reached ({kind}: new, address-change, conflict) and MQTT messages
+	// (discovery configs, LWT, STATE, INFO, Status 5 replies) the manager's queue had no room for
+	// ({kind}: queue_full).
 	DiscoveryDropped *Vec
 	// MQTTDropped counts MQTT messages or retained cache entries the bus
 	// dropped ({reason}).
@@ -259,7 +261,7 @@ func NewStandard(r *Registry, version string, decoder bool) *Standard {
 		FirmwareIndexAge: r.Gauge("tasmofleet_firmware_index_age_seconds",
 			"Seconds since the upstream firmware index was last refreshed successfully (since start if never)."),
 		MQTTDropped:      r.Counter("tasmofleet_mqtt_dropped_total", "MQTT messages or retained-cache entries dropped by the bus.", "reason"),
-		DiscoveryDropped: r.Counter("tasmofleet_discovery_proposals_dropped_total", "Discovery proposals not stored because the limit was reached.", "kind"),
+		DiscoveryDropped: r.Counter("tasmofleet_discovery_proposals_dropped_total", "Discovery proposals not stored because the limit was reached, and MQTT messages (discovery configs, LWT, STATE, INFO, Status 5 replies) discovery had no room for in its queue.", "kind"),
 		BackupLastOK:     r.Gauge("tasmofleet_backup_last_success_timestamp_seconds", "Unix time of the last successful backup per device. Without device labels one series, device=\"fleet\": the oldest of the devices' newest backups.", "device", "id"),
 		MQTTConnected:    r.Gauge("tasmofleet_mqtt_connected", "1 if the MQTT connection is up."),
 		HTTPRequests:     r.Counter("tasmofleet_http_requests_total", "HTTP requests by route pattern and status code.", "route", "code"),
