@@ -184,6 +184,47 @@ test("Discovered: a dismissed address change and conflict are counted, listed an
   }
 });
 
+// Why (#745): a row's number is reused after the row is deleted, so Ignore on a page loaded earlier acted on a
+// device the person never saw. The button carries the version it was shown; the other device stays listed.
+test("Discovered: Ignore on a stale page is refused and does not hide the device that took the number", async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 900 });
+  const { DatabaseSync } = await import("node:sqlite");
+  const file = join(app.dataDir, "tasmofleet.db");
+  const macs = ["aa:bb:cc:00:04:01", "aa:bb:cc:00:04:02"];
+  const withDb = (fn: (db: import("node:sqlite").DatabaseSync) => void) => {
+    const db = new DatabaseSync(file);
+    try {
+      db.exec("PRAGMA busy_timeout=5000");
+      fn(db);
+    } finally {
+      db.close();
+    }
+  };
+  const insert = (mac: string, name: string, ip: string) =>
+    withDb((db) => {
+      const now = Date.now();
+      db.prepare(
+        `INSERT INTO discovery_proposals (mac, kind, via, reason, name, address, port, topic, full_topic, existing_id, dismissed, first_seen, seen_at, hostname)
+         VALUES (?, 'new', 'mqtt', '', ?, ?, 80, '', '', 0, 0, ?, ?, '')`,
+      ).run(mac, name, ip, now - 3600_000, now - 5_000);
+    });
+  try {
+    insert(macs[0], "Stale lamp", "127.0.0.41");
+    await page.goto(app.url + "/devices/new");
+    const row = (name: string) => box(page, "discovered").getByRole("row").filter({ hasText: name });
+    await expect(row("Stale lamp")).toHaveCount(1);
+    // the row behind the button is deleted (Add, the overtaken cleanup, the 30-day prune) and another device takes its number
+    withDb((db) => db.prepare("DELETE FROM discovery_proposals WHERE mac = ?").run(macs[0]));
+    insert(macs[1], "Fresh lamp", "127.0.0.42");
+    await row("Stale lamp").getByRole("button", { name: "Ignore", exact: true }).click();
+    await expect(page.getByText("The form is out of date. Reload the page and try again.")).toBeVisible();
+    await expect(row("Fresh lamp"), "the device that took the number is still listed").toHaveCount(1);
+    await expect(box(page, "discovered").getByRole("checkbox", { name: /Show ignored/ })).toContainText("Show ignored (0)");
+  } finally {
+    withDb((db) => db.prepare("DELETE FROM discovery_proposals WHERE mac IN (?, ?)").run(macs[0], macs[1]));
+  }
+});
+
 // Why: Scan now stays one click, and the scan runs live where its results are: the results page. The box
 // then says in one line what the last scan found, WHEN (a date stamp, not a bare clock time) and links all results.
 test("Network scan: Scan now opens the live results, the box keeps a one-line summary with All results", async ({ page }) => {

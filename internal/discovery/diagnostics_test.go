@@ -230,8 +230,7 @@ func (failingLookup) GetProposal(context.Context, int64) (store.ProposalRow, err
 
 // Why (#716): the audit log must say which device was ignored or restored. "proposal:7" with an empty
 // detail only gave an id that is gone after 30 days. The detail carries what Accept records (kind,
-// MAC, address) and the name, which is what a person recognises. The lookup is only for the record:
-// when it fails, the ignore still happens (the admin's action must not depend on a log detail).
+// MAC, address) and the name, which is what a person recognises.
 func TestDismissAndUndismissAuditTheDevice(t *testing.T) {
 	last := func(e *env) (model.AuditEvent, map[string]any) {
 		t.Helper()
@@ -247,14 +246,15 @@ func TestDismissAndUndismissAuditTheDevice(t *testing.T) {
 	t.Run("detail names the device", func(t *testing.T) {
 		e := newEnv(t, "172.31.0.0/16", nil)
 		e.mgr.handleMessage(bg, discoveryMsg("02005ED22C14", "172.31.13.31", "lamp"))
-		id := mustProposals(t, e)[0].ID
+		shown := mustProposals(t, e)[0]
+		id := shown.ID
 		want := map[string]any{"kind": KindNew, "name": "Lamp lamp", "mac": "02:00:5e:d2:2c:14", "address": "172.31.13.31"}
 		for _, step := range []struct {
 			action string
 			do     func() error
 		}{
-			{"discovery.dismiss", func() error { return e.mgr.Dismiss(bg, "admin", id) }},
-			{"discovery.undismiss", func() error { return e.mgr.Undismiss(bg, "admin", id) }},
+			{"discovery.dismiss", func() error { return e.mgr.Dismiss(bg, "admin", id, shown.Version) }},
+			{"discovery.undismiss", func() error { return e.mgr.Undismiss(bg, "admin", id, shown.Version) }},
 		} {
 			if err := step.do(); err != nil {
 				t.Fatal(err)
@@ -270,25 +270,27 @@ func TestDismissAndUndismissAuditTheDevice(t *testing.T) {
 			}
 		}
 	})
-	t.Run("a failed lookup does not block the ignore", func(t *testing.T) {
+	// The lookup is what the version is checked against (#745): without it nothing can tell whether the
+	// number still names the device the admin saw, so an Ignore is refused rather than guessed.
+	t.Run("a failed lookup refuses the ignore", func(t *testing.T) {
 		e := newEnv(t, "172.31.0.0/16", nil)
 		e.mgr.handleMessage(bg, discoveryMsg("02005ED22C14", "172.31.13.31", "lamp"))
-		id := mustProposals(t, e)[0].ID
+		shown := mustProposals(t, e)[0]
 		e.mgr.o.Store = failingLookup{DiscoveryStore: e.mgr.o.Store}
-		if err := e.mgr.Dismiss(bg, "admin", id); err != nil {
-			t.Fatalf("dismiss: %v", err)
+		if err := e.mgr.Dismiss(bg, "admin", shown.ID, shown.Version); err == nil {
+			t.Fatal("dismiss went through without a lookup")
 		}
-		if ev, _ := last(e); ev.Action != "discovery.dismiss" || ev.Result != "ok" {
+		if ev, _ := last(e); ev.Action != "discovery.dismiss" || ev.Result == "ok" {
 			t.Fatalf("event %+v", ev)
 		}
 		e.mgr.o.Store = e.st
-		if len(mustProposals(t, e)) != 0 {
-			t.Fatal("the proposal is still visible")
+		if len(mustProposals(t, e)) != 1 {
+			t.Fatal("the proposal was hidden although the ignore was refused")
 		}
 	})
 	t.Run("an unknown id is still refused and audited", func(t *testing.T) {
 		e := newEnv(t, "172.31.0.0/16", nil)
-		if err := e.mgr.Dismiss(bg, "admin", 999); !errors.Is(err, ErrNotFound) {
+		if err := e.mgr.Dismiss(bg, "admin", 999, "v"); !errors.Is(err, ErrNotFound) {
 			t.Fatalf("err = %v", err)
 		}
 		if ev, _ := last(e); ev.Result != ErrNotFound.Error() {

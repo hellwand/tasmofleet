@@ -915,41 +915,51 @@ func MoveRefusal(d model.Device) error {
 	return nil
 }
 
-// Undismiss makes an ignored proposal visible again.
-func (m *Manager) Undismiss(ctx context.Context, actor string, id int64) error {
-	det := m.proposalDetail(ctx, id)
-	err := m.o.Store.UndismissProposal(ctx, id)
-	if errors.Is(err, store.ErrNotFound) {
-		err = ErrNotFound
-	}
-	m.audit(ctx, actor, "discovery.undismiss", fmt.Sprintf("proposal:%d", id), det, err)
-	return err
-}
-
-// proposalDetail is the audit detail that says which device a proposal is about: what Accept
-// records (kind, MAC, address) and the name. The proposal id alone means nothing once the proposal
-// is gone. The lookup serves the record only; when it fails the detail is empty and the action goes on.
-func (m *Manager) proposalDetail(ctx context.Context, id int64) map[string]any {
-	row, err := m.o.Store.GetProposal(ctx, id)
-	if err != nil {
-		if !errors.Is(err, store.ErrNotFound) {
-			m.log.Warn("discovery: audit detail of a proposal unavailable", "id", id, "err", err)
-		}
-		return map[string]any{}
-	}
-	return map[string]any{"kind": row.Kind, "name": row.Device.Name, "mac": row.Device.MAC, "address": row.Device.Address}
+// Undismiss makes an ignored proposal visible again. version is the Proposal.Version the admin
+// was shown; see Dismiss.
+func (m *Manager) Undismiss(ctx context.Context, actor string, id int64, version string) error {
+	return m.toggle(ctx, actor, "discovery.undismiss", id, version, m.o.Store.UndismissProposal)
 }
 
 // Dismiss hides a proposal. It stays hidden until the device is seen with
 // different data, and is deleted after 30 days without a sighting.
-func (m *Manager) Dismiss(ctx context.Context, actor string, id int64) error {
-	det := m.proposalDetail(ctx, id)
-	err := m.o.Store.DismissProposal(ctx, id)
+//
+// version is the Proposal.Version the admin was shown. Proposal numbers are reused after a row is
+// deleted (Add, the overtaken cleanup, the 30-day prune), so the number alone can name another
+// device than the one on the admin's screen. A version that does not match the row now behind
+// the number is refused (ErrStale), and so is an empty one: Add checks the same (AcceptVersion).
+func (m *Manager) Dismiss(ctx context.Context, actor string, id int64, version string) error {
+	return m.toggle(ctx, actor, "discovery.dismiss", id, version, m.o.Store.DismissProposal)
+}
+
+// toggle runs write (hide or show) on the proposal id if it still has the shown version. It
+// holds the lock of the evaluation of new sightings, like AcceptVersion, so the row cannot
+// be replaced by a sighting between the check and the write. The audit entry says which device
+// the proposal is about (what Accept records, and the name): the proposal id alone means nothing
+// once the proposal is gone. A refusal is audited too, with the device now behind the number.
+func (m *Manager) toggle(ctx context.Context, actor, action string, id int64, version string, write func(context.Context, int64) error) error {
+	m.cmu.Lock()
+	defer m.cmu.Unlock()
+	det := map[string]any{}
+	row, err := m.o.Store.GetProposal(ctx, id)
+	switch {
+	case err == nil && (version == "" || version != versionOf(row)):
+		det = proposalDetail(row)
+		err = fmt.Errorf("%w: the proposal changed after it was shown", ErrStale)
+	case err == nil:
+		det = proposalDetail(row)
+		err = write(ctx, id)
+	}
 	if errors.Is(err, store.ErrNotFound) {
 		err = ErrNotFound
 	}
-	m.audit(ctx, actor, "discovery.dismiss", fmt.Sprintf("proposal:%d", id), det, err)
+	m.audit(ctx, actor, action, fmt.Sprintf("proposal:%d", id), det, err)
 	return err
+}
+
+// proposalDetail is the audit detail that says which device a proposal is about.
+func proposalDetail(row store.ProposalRow) map[string]any {
+	return map[string]any{"kind": row.Kind, "name": row.Device.Name, "mac": row.Device.MAC, "address": row.Device.Address}
 }
 
 // networks returns the device networks in force now.

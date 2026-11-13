@@ -264,7 +264,7 @@ func TestDismissedProposalCannotBeAccepted(t *testing.T) {
 	e := newEnv(t, "172.31.0.0/16", nil)
 	e.mgr.handleMessage(bg, discoveryMsg("02BBBBBBBBBB", "172.31.13.77", "x"))
 	p := mustProposals(t, e)
-	if err := e.mgr.Dismiss(bg, "admin", p[0].ID); err != nil {
+	if err := e.mgr.Dismiss(bg, "admin", p[0].ID, p[0].Version); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := e.mgr.AcceptVersion(bg, "admin", p[0].ID, p[0].Version); !errors.Is(err, ErrNotFound) {
@@ -299,7 +299,7 @@ func TestChangedNameOrTopicChangesVersionAndUnhides(t *testing.T) {
 	e := newEnv(t, "172.31.0.0/16", nil)
 	e.mgr.handleMessage(bg, discoveryMsg("02BBBBBBBBBB", "172.31.13.77", "x"))
 	p := mustProposals(t, e)[0]
-	if err := e.mgr.Dismiss(bg, "admin", p.ID); err != nil {
+	if err := e.mgr.Dismiss(bg, "admin", p.ID, p.Version); err != nil {
 		t.Fatal(err)
 	}
 	e.mgr.last = map[string]time.Time{}

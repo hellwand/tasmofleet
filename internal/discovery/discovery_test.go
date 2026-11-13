@@ -464,7 +464,7 @@ func TestDismissHidesProposalAndSurvivesReplay(t *testing.T) {
 	e := newEnv(t, "172.31.0.0/16", nil)
 	e.mgr.handleMessage(bg, discoveryMsg("02005ED22C14", "172.31.13.31", "lamp"))
 	p := mustProposals(t, e)
-	if err := e.mgr.Dismiss(bg, "admin", p[0].ID); err != nil {
+	if err := e.mgr.Dismiss(bg, "admin", p[0].ID, p[0].Version); err != nil {
 		t.Fatal(err)
 	}
 	e.mgr.last = map[string]time.Time{} // let the replay through the rate limit
@@ -472,7 +472,7 @@ func TestDismissHidesProposalAndSurvivesReplay(t *testing.T) {
 	if len(mustProposals(t, e)) != 0 {
 		t.Fatal("dismissed device came back after a retained replay")
 	}
-	if err := e.mgr.Dismiss(bg, "admin", 999); !errors.Is(err, ErrNotFound) {
+	if err := e.mgr.Dismiss(bg, "admin", 999, "v"); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("err = %v", err)
 	}
 }

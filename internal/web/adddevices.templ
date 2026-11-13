@@ -305,9 +305,9 @@ templ discoveredBody(p discView) {
 								<td class="add-t2"><time datetime={ r.Last.UTC().Format("2006-01-02T15:04:05Z") }>{ r.LastText }</time></td>
 								<td class="act">
 									if r.Ignored {
-										<button type="submit" class="btn btn-sm" formaction={ templ.SafeURL(p.Base + "/discovery/proposals/" + strconv.FormatInt(r.ID, 10) + "/undismiss") }>Restore</button>
+										<button type="submit" class="btn btn-sm" formaction={ templ.SafeURL(p.Base + "/discovery/proposals/" + strconv.FormatInt(r.ID, 10) + "/undismiss") } name="version" value={ r.Version }>Restore</button>
 									} else {
-										<button type="submit" class="btn btn-ghost add-ign" formaction={ templ.SafeURL(p.Base + "/discovery/proposals/" + strconv.FormatInt(r.ID, 10) + "/dismiss") }>Ignore</button>
+										<button type="submit" class="btn btn-ghost add-ign" formaction={ templ.SafeURL(p.Base + "/discovery/proposals/" + strconv.FormatInt(r.ID, 10) + "/dismiss") } name="version" value={ r.Version }>Ignore</button>
 										<a class="btn btn-sm" href={ templ.SafeURL(r.AddHref) } title="Add with a web password">Add…</a>
 										<button type="submit" class="btn btn-primary" formaction={ templ.SafeURL(p.Base + "/discovery/proposals/" + strconv.FormatInt(r.ID, 10) + "/accept") } name="version" value={ r.Version }>Add</button>
 									}
@@ -341,10 +341,10 @@ templ discoveredBody(p discView) {
 							<span class="add-card-meta"><span data-visual-mask>{ r.Address }</span>{ metaTail(cardHost(r)) }</span>
 							<span class="add-card-src">{ r.Source } · last seen <time datetime={ r.Last.UTC().Format("2006-01-02T15:04:05Z") }>{ r.LastText }</time></span>
 							if r.Ignored {
-								<button type="submit" class="btn add-card-btn" formaction={ templ.SafeURL(p.Base + "/discovery/proposals/" + strconv.FormatInt(r.ID, 10) + "/undismiss") }>Restore</button>
+								<button type="submit" class="btn add-card-btn" formaction={ templ.SafeURL(p.Base + "/discovery/proposals/" + strconv.FormatInt(r.ID, 10) + "/undismiss") } name="version" value={ r.Version }>Restore</button>
 							} else {
 								<div class="add-card-acts">
-									<button type="submit" class="btn" formaction={ templ.SafeURL(p.Base + "/discovery/proposals/" + strconv.FormatInt(r.ID, 10) + "/dismiss") }>Ignore</button>
+									<button type="submit" class="btn" formaction={ templ.SafeURL(p.Base + "/discovery/proposals/" + strconv.FormatInt(r.ID, 10) + "/dismiss") } name="version" value={ r.Version }>Ignore</button>
 									<a class="btn" href={ templ.SafeURL(r.AddHref) }>Add…</a>
 									<button type="submit" class="btn btn-primary" formaction={ templ.SafeURL(p.Base + "/discovery/proposals/" + strconv.FormatInt(r.ID, 10) + "/accept") } name="version" value={ r.Version }>Add</button>
 								</div>
@@ -721,10 +721,10 @@ templ scanLive(b scanBodyView) {
 templ scanRowActs(b scanBodyView, r scanRow) {
 	switch {
 		case r.Kind == "new":
-			<button type="submit" class="btn btn-ghost add-ign" formaction={ templ.SafeURL(b.Base + "/discovery/proposals/" + strconv.FormatInt(r.ProposalID, 10) + "/dismiss") }>Ignore</button>
+			<button type="submit" class="btn btn-ghost add-ign" formaction={ templ.SafeURL(b.Base + "/discovery/proposals/" + strconv.FormatInt(r.ProposalID, 10) + "/dismiss") } name="version" value={ r.Version }>Ignore</button>
 			<a class="btn btn-sm" href={ templ.SafeURL(r.AddHref) }>Add</a>
 		case r.Kind == "ignored":
-			<button type="submit" class="btn btn-link" formaction={ templ.SafeURL(b.Base + "/discovery/proposals/" + strconv.FormatInt(r.ProposalID, 10) + "/undismiss") }>Un-ignore</button>
+			<button type="submit" class="btn btn-link" formaction={ templ.SafeURL(b.Base + "/discovery/proposals/" + strconv.FormatInt(r.ProposalID, 10) + "/undismiss") } name="version" value={ r.Version }>Un-ignore</button>
 		case r.OpenHref != "":
 			<a class="btn btn-link" href={ templ.SafeURL(r.OpenHref) }>Open</a>
 		case r.ReviewRef != "":

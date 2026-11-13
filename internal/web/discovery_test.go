@@ -30,13 +30,15 @@ type fakeDiscovery struct {
 	confirmed []string
 	passwords []string // discovery.DevicePassword of each AcceptVersion
 	unident   []discovery.Unidentified
+
+	dismissVersions, undismissVersions []string // the version each Dismiss and Undismiss carried
 }
 
 func (f *fakeDiscovery) Unidentified() []discovery.Unidentified { return f.unident }
 
 func (f *fakeDiscovery) Ignored(context.Context) ([]discovery.Proposal, error) { return f.ignored, nil }
-func (f *fakeDiscovery) Undismiss(_ context.Context, _ string, id int64) error {
-	f.undismiss = append(f.undismiss, id)
+func (f *fakeDiscovery) Undismiss(_ context.Context, _ string, id int64, version string) error {
+	f.undismiss, f.undismissVersions = append(f.undismiss, id), append(f.undismissVersions, version)
 	for i, p := range f.ignored { // like the service: the proposal is open again
 		if p.ID == id {
 			f.props = append(f.props, p)
@@ -71,8 +73,8 @@ func (f *fakeDiscovery) AcceptVersion(ctx context.Context, actor string, id int6
 	f.passwords = append(f.passwords, discovery.DevicePassword(ctx))
 	return f.Accept(ctx, actor, id)
 }
-func (f *fakeDiscovery) Dismiss(_ context.Context, _ string, id int64) error {
-	f.dismissed = append(f.dismissed, id)
+func (f *fakeDiscovery) Dismiss(_ context.Context, _ string, id int64, version string) error {
+	f.dismissed, f.dismissVersions = append(f.dismissed, id), append(f.dismissVersions, version)
 	return nil
 }
 func (f *fakeDiscovery) Scan(id discovery.ScanID) (discovery.ScanStatus, bool) {
@@ -168,9 +170,9 @@ func TestAddressChangeNeedsNoCheckbox(t *testing.T) {
 	if r.StatusCode != 303 || len(fd.accepted) != 2 {
 		t.Fatalf("new device: status %d, accepted %v", r.StatusCode, fd.accepted)
 	}
-	r, _ = e.do(t, "POST", "/discovery/proposals/1/dismiss", "admin", url.Values{})
-	if r.StatusCode != 303 || len(fd.dismissed) != 1 {
-		t.Fatalf("dismiss: status %d", r.StatusCode)
+	r, _ = e.do(t, "POST", "/discovery/proposals/1/dismiss", "admin", url.Values{"version": {"v1"}})
+	if r.StatusCode != 303 || len(fd.dismissed) != 1 || fd.dismissVersions[0] != "v1" {
+		t.Fatalf("dismiss: status %d, versions %v", r.StatusCode, fd.dismissVersions)
 	}
 }
 
@@ -261,17 +263,17 @@ func TestTooManyRangesRefused(t *testing.T) {
 // ignored device a "Restore" that reaches the service; only admins may use it.
 func TestIgnoredDevicesCanBeShownAndUnignored(t *testing.T) {
 	e, fd := setupDiscovery(t)
-	fd.ignored = []discovery.Proposal{{ID: 9, Kind: discovery.KindNew, SeenAt: time.Now(), Device: model.Device{Name: "hidden-lamp", Address: "10.0.0.60", MAC: "aa:bb:cc:dd:ee:09"}}}
+	fd.ignored = []discovery.Proposal{{ID: 9, Version: "v9", Kind: discovery.KindNew, SeenAt: time.Now(), Device: model.Device{Name: "hidden-lamp", Address: "10.0.0.60", MAC: "aa:bb:cc:dd:ee:09"}}}
 	_, body := e.do(t, "GET", "/devices/new", "admin", nil)
 	if !strings.Contains(body, "Show ignored") || strings.Contains(body, "hidden-lamp") {
 		t.Fatal("the ignored list must be offered but not shown by default")
 	}
 	_, body = e.do(t, "GET", "/devices/new?ignored=1", "admin", nil)
-	if !strings.Contains(body, "hidden-lamp") || !strings.Contains(body, `formaction="/tf/discovery/proposals/9/undismiss">Restore</button>`) {
+	if !strings.Contains(body, "hidden-lamp") || !strings.Contains(body, `formaction="/tf/discovery/proposals/9/undismiss" name="version" value="v9">Restore</button>`) {
 		t.Fatal("ignored devices are not listed with a Restore button")
 	}
-	r, _ := e.do(t, "POST", "/discovery/proposals/9/undismiss", "admin", url.Values{})
-	if r.StatusCode != 303 || len(fd.undismiss) != 1 || fd.undismiss[0] != 9 {
+	r, _ := e.do(t, "POST", "/discovery/proposals/9/undismiss", "admin", url.Values{"version": {"v9"}})
+	if r.StatusCode != 303 || len(fd.undismiss) != 1 || fd.undismiss[0] != 9 || fd.undismissVersions[0] != "v9" {
 		t.Fatalf("status %d, undismissed %v", r.StatusCode, fd.undismiss)
 	}
 }
@@ -321,7 +323,7 @@ func TestDismissedAddressChangeAndConflictCanBeRestored(t *testing.T) {
 	}
 
 	for _, id := range []string{"2", "3"} {
-		if r, _ := e.do(t, "POST", "/discovery/proposals/"+id+"/undismiss", "admin", url.Values{}); r.StatusCode != 303 {
+		if r, _ := e.do(t, "POST", "/discovery/proposals/"+id+"/undismiss", "admin", url.Values{"version": {"v" + id}}); r.StatusCode != 303 {
 			t.Fatalf("restore %s: status %d", id, r.StatusCode)
 		}
 	}

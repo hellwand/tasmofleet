@@ -288,7 +288,7 @@ func (h *handler) scanRowOf(base string, hit discovery.Hit, byMAC map[string]sca
 	sp, ok := byMAC[hit.MAC]
 	switch {
 	case ok && sp.Dismissed:
-		row.Label, row.Tone, row.Kind, row.ProposalID = "Ignored", ui.ToneNeutral, "ignored", sp.P.ID
+		row.Label, row.Tone, row.Kind, row.ProposalID, row.Version = "Ignored", ui.ToneNeutral, "ignored", sp.P.ID, sp.P.Version
 	case ok && sp.P.Kind == discovery.KindNew:
 		row.Label, row.Tone, row.Kind, row.ProposalID, row.Version = "New", ui.ToneAccent, "new", sp.P.ID, sp.P.Version
 		row.AddHref = base + "/devices/new?proposal=" + strconv.FormatInt(sp.P.ID, 10) + "#card-manual"

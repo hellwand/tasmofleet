@@ -30,7 +30,7 @@ type Discovery interface {
 	AcceptVersion(ctx context.Context, actor string, id int64, version string) (model.DeviceID, error)
 	// Ignored lists the dismissed proposals; Undismiss makes one visible again.
 	Ignored(ctx context.Context) ([]discovery.Proposal, error)
-	Undismiss(ctx context.Context, actor string, id int64) error
+	Undismiss(ctx context.Context, actor string, id int64, version string) error
 	Scan(id discovery.ScanID) (discovery.ScanStatus, bool)
 	Scans() []discovery.ScanStatus
 	// Unidentified lists the topics seen on MQTT that are not a proposal (spec 11.3a).
@@ -759,17 +759,47 @@ func (h *handler) discoveryAcceptSelected(w http.ResponseWriter, r *http.Request
 	h.discoveryRender(w, r, http.StatusConflict, p)
 }
 
-// discoveryDismissSelected ignores every ticked new device ("Ignore selected").
+// formOutOfDate is what a page that no longer matches the proposals behind its numbers is told.
+const formOutOfDate = "The form is out of date. Reload the page and try again."
+
+// discoveryError shows the Add page with msg, for a request that changed nothing.
+func (h *handler) discoveryError(w http.ResponseWriter, r *http.Request, status int, msg string) {
+	p := h.discoveryData(r)
+	p.Error = msg
+	h.discoveryRender(w, r, status, p)
+}
+
+// discoveryDismissSelected ignores every ticked new device ("Ignore selected"). Each tick
+// carries the version that was shown; one whose proposal changed since (its number can be
+// reused by another device) is left alone and reported, the others are ignored.
 func (h *handler) discoveryDismissSelected(w http.ResponseWriter, r *http.Request) {
 	limitBody(w, r)
-	ids, _ := selectedProposals(r)
-	for _, id := range ids {
-		if err := h.d.Discovery.Dismiss(r.Context(), actor(r), id); err != nil && !errors.Is(err, discovery.ErrNotFound) {
+	ids, versions := selectedProposals(r)
+	if slices.Contains(versions, "") { // like Add: nothing the admin saw can be named without it
+		h.discoveryError(w, r, http.StatusUnprocessableEntity, formOutOfDate)
+		return
+	}
+	ignored, stale := 0, 0
+	for i, id := range ids {
+		switch err := h.d.Discovery.Dismiss(r.Context(), actor(r), id, versions[i]); {
+		case err == nil:
+			ignored++
+		case errors.Is(err, discovery.ErrNotFound): // already gone: nothing left to hide
+		case errors.Is(err, discovery.ErrStale):
+			stale++
+		default:
 			h.fail(w, r, err)
 			return
 		}
 	}
-	redirect(w, r, discBack(r, "dismissed"))
+	switch {
+	case stale == 0:
+		redirect(w, r, discBack(r, "dismissed"))
+	case ignored == 0:
+		h.discoveryError(w, r, http.StatusConflict, formOutOfDate)
+	default:
+		h.discoveryError(w, r, http.StatusConflict, fmt.Sprintf("%s ignored, %d not: %s", plural(ignored, "device"), stale, formOutOfDate))
+	}
 }
 
 func nameOr(p discovery.Proposal) string {
@@ -780,32 +810,35 @@ func nameOr(p discovery.Proposal) string {
 }
 
 func (h *handler) discoveryDismiss(w http.ResponseWriter, r *http.Request) {
-	id, ok := proposalID(r)
-	if !ok {
-		h.notFound(w, r)
-		return
-	}
-	switch err := h.d.Discovery.Dismiss(r.Context(), actor(r), id); {
-	case err == nil:
-		redirect(w, r, discBack(r, "dismissed"))
-	case errors.Is(err, discovery.ErrNotFound):
-		h.notFound(w, r)
-	default:
-		h.fail(w, r, err)
-	}
+	h.discoveryToggle(w, r, h.d.Discovery.Dismiss, "dismissed")
 }
 
 func (h *handler) discoveryUndismiss(w http.ResponseWriter, r *http.Request) {
+	h.discoveryToggle(w, r, h.d.Discovery.Undismiss, "undismissed")
+}
+
+// discoveryToggle is Ignore or Restore of the proposal numbered in the path. The form carries
+// the version the page showed; the number alone is not enough because it is reused after
+// the row behind it is deleted, so a stale page would act on another device (#745).
+func (h *handler) discoveryToggle(w http.ResponseWriter, r *http.Request, act func(ctx context.Context, actor string, id int64, version string) error, done string) {
+	limitBody(w, r)
 	id, ok := proposalID(r)
 	if !ok {
 		h.notFound(w, r)
 		return
 	}
-	switch err := h.d.Discovery.Undismiss(r.Context(), actor(r), id); {
+	version := r.PostFormValue("version")
+	if version == "" {
+		h.discoveryError(w, r, http.StatusUnprocessableEntity, formOutOfDate)
+		return
+	}
+	switch err := act(r.Context(), actor(r), id, version); {
 	case err == nil:
-		redirect(w, r, discBack(r, "undismissed"))
+		redirect(w, r, discBack(r, done))
 	case errors.Is(err, discovery.ErrNotFound):
 		h.notFound(w, r)
+	case errors.Is(err, discovery.ErrStale):
+		h.discoveryError(w, r, http.StatusConflict, formOutOfDate)
 	default:
 		h.fail(w, r, err)
 	}

@@ -85,7 +85,8 @@ type Service interface {
 	// ("address-change") through the inventory service. A conflict cannot be
 	// accepted (ErrNotAcceptable).
 	Accept(ctx context.Context, actor string, id int64) (model.DeviceID, error)
-	Dismiss(ctx context.Context, actor string, id int64) error
+	// Dismiss hides the proposal if it still has the shown version, else ErrStale.
+	Dismiss(ctx context.Context, actor string, id int64, version string) error
 }
 
 // ScanState is the life cycle of a scan.

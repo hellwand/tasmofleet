@@ -224,7 +224,7 @@ func TestIgnoredProposalCanBeShownAndUnignored(t *testing.T) {
 		t.Fatal(err)
 	}
 	p := mustProposals(t, e)
-	if err := e.mgr.Dismiss(bg, "admin", p[0].ID); err != nil {
+	if err := e.mgr.Dismiss(bg, "admin", p[0].ID, p[0].Version); err != nil {
 		t.Fatal(err)
 	}
 	if got := mustProposals(t, e); len(got) != 0 {
@@ -234,7 +234,7 @@ func TestIgnoredProposalCanBeShownAndUnignored(t *testing.T) {
 	if err != nil || len(ign) != 1 || ign[0].ID != p[0].ID {
 		t.Fatalf("ignored = %+v, %v", ign, err)
 	}
-	if err := e.mgr.Undismiss(bg, "admin", p[0].ID); err != nil {
+	if err := e.mgr.Undismiss(bg, "admin", p[0].ID, p[0].Version); err != nil {
 		t.Fatal(err)
 	}
 	if got := mustProposals(t, e); len(got) != 1 {
@@ -246,7 +246,7 @@ func TestIgnoredProposalCanBeShownAndUnignored(t *testing.T) {
 	if !e.audit.has("discovery.undismiss") {
 		t.Error("un-ignore not audited")
 	}
-	if err := e.mgr.Undismiss(bg, "admin", 999); !errors.Is(err, ErrNotFound) {
+	if err := e.mgr.Undismiss(bg, "admin", 999, "v"); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("unknown id: %v", err)
 	}
 }

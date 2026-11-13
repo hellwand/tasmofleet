@@ -221,7 +221,7 @@ func TestNewDevicesActionsKeepStateAndSort(t *testing.T) {
 			t.Errorf("bulk form lacks hidden %s", want)
 		}
 	}
-	form := url.Values{"state": {"offline"}, "sort": {"ip"}, "dir": {"desc"}, "ignored": {"1"}}
+	form := url.Values{"state": {"offline"}, "sort": {"ip"}, "dir": {"desc"}, "ignored": {"1"}, "version": {"v1"}}
 	for _, path := range []string{"/discovery/proposals/1/dismiss", "/discovery/proposals/1/undismiss"} {
 		r, _ := e.do(t, "POST", path, "admin", form)
 		loc := r.Header.Get("Location")
@@ -232,7 +232,7 @@ func TestNewDevicesActionsKeepStateAndSort(t *testing.T) {
 		}
 	}
 	// the default view needs no parameters
-	if r, _ := e.do(t, "POST", "/discovery/proposals/1/dismiss", "admin", nil); r.Header.Get("Location") != "/tf/devices/new?ok=dismissed" {
+	if r, _ := e.do(t, "POST", "/discovery/proposals/1/dismiss", "admin", url.Values{"version": {"v1"}}); r.Header.Get("Location") != "/tf/devices/new?ok=dismissed" {
 		t.Errorf("default redirect %q", r.Header.Get("Location"))
 	}
 }
