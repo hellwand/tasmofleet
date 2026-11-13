@@ -134,7 +134,7 @@ func usedByText(a artifactView) string {
 	if len(a.Devices) == 0 {
 		return "none"
 	}
-	s := devNames(a.Devices)
+	s := devNames(a.Devices, noLimit)
 	if rest := len(a.Devices) - a.Waiting; a.Waiting > 0 && rest > 0 {
 		s += " (" + plural(a.Waiting, "device") + " still to update, " + strconv.Itoa(rest) + " already up to date or not updatable)"
 	}

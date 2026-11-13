@@ -1474,9 +1474,9 @@ func fwFileRow(v view, p firmwarePage, r releaseView, f fileView) templ.Componen
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var65 string
-		templ_7745c5c3_Var65, templ_7745c5c3_Err = templ.ResolveAttributeValue(devNames(f.UsedBy))
+		templ_7745c5c3_Var65, templ_7745c5c3_Err = templ.ResolveAttributeValue(devNames(f.UsedBy, tooltipMax))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/firmware.templ`, Line: 363, Col: 52}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/firmware.templ`, Line: 363, Col: 64}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var65)
 		if templ_7745c5c3_Err != nil {
@@ -1489,7 +1489,7 @@ func fwFileRow(v view, p firmwarePage, r releaseView, f fileView) templ.Componen
 		var templ_7745c5c3_Var66 string
 		templ_7745c5c3_Var66, templ_7745c5c3_Err = templ.JoinStringErrs(plural(len(f.UsedBy), "device"))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/firmware.templ`, Line: 363, Col: 88}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/firmware.templ`, Line: 363, Col: 100}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var66))
 		if templ_7745c5c3_Err != nil {
@@ -1590,13 +1590,32 @@ func fwFileRow(v view, p firmwarePage, r releaseView, f fileView) templ.Componen
 	})
 }
 
-// devNames lists device names for a title.
-func devNames(ds []deviceRef) string {
-	names := make([]string, 0, len(ds))
-	for _, d := range ds {
-		names = append(names, d.Name)
+// tooltipMax is the longest a title may be; tests/columns.spec.ts checks the rendered pages.
+const tooltipMax = 160
+
+// noLimit lists every device, for text that is shown on the page and not as a title.
+const noLimit = int(^uint(0) >> 1)
+
+// devNames lists device names, at most limit characters of them; the names that do not fit are
+// counted ("a, b and 3 more"). The first name is always shown.
+func devNames(ds []deviceRef, limit int) string {
+	var b strings.Builder
+	for i, d := range ds {
+		sep := ", "
+		if i == 0 {
+			sep = ""
+		}
+		left := len(ds) - i - 1
+		rest := ""
+		if left > 0 {
+			rest = " and " + strconv.Itoa(left) + " more"
+		}
+		if i > 0 && b.Len()+len(sep)+len(d.Name)+len(rest) > limit {
+			return b.String() + " and " + strconv.Itoa(len(ds)-i) + " more"
+		}
+		b.WriteString(sep + d.Name)
 	}
-	return strings.Join(names, ", ")
+	return b.String()
 }
 
 func fwFetchButton(v view, release, file, label string) templ.Component {
@@ -1627,7 +1646,7 @@ func fwFetchButton(v view, release, file, label string) templ.Component {
 		var templ_7745c5c3_Var71 templ.SafeURL
 		templ_7745c5c3_Var71, templ_7745c5c3_Err = templ.JoinURLErrs(templ.SafeURL(v.Base + "/firmware/fetch"))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/firmware.templ`, Line: 401, Col: 71}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/firmware.templ`, Line: 420, Col: 71}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var71))
 		if templ_7745c5c3_Err != nil {
@@ -1640,7 +1659,7 @@ func fwFetchButton(v view, release, file, label string) templ.Component {
 		var templ_7745c5c3_Var72 string
 		templ_7745c5c3_Var72, templ_7745c5c3_Err = templ.ResolveAttributeValue(v.CSRF)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/firmware.templ`, Line: 402, Col: 49}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/firmware.templ`, Line: 421, Col: 49}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var72)
 		if templ_7745c5c3_Err != nil {
@@ -1653,7 +1672,7 @@ func fwFetchButton(v view, release, file, label string) templ.Component {
 		var templ_7745c5c3_Var73 string
 		templ_7745c5c3_Var73, templ_7745c5c3_Err = templ.ResolveAttributeValue(release)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/firmware.templ`, Line: 403, Col: 53}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/firmware.templ`, Line: 422, Col: 53}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var73)
 		if templ_7745c5c3_Err != nil {
@@ -1666,7 +1685,7 @@ func fwFetchButton(v view, release, file, label string) templ.Component {
 		var templ_7745c5c3_Var74 string
 		templ_7745c5c3_Var74, templ_7745c5c3_Err = templ.ResolveAttributeValue(file)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/firmware.templ`, Line: 404, Col: 51}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/firmware.templ`, Line: 423, Col: 51}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var74)
 		if templ_7745c5c3_Err != nil {
@@ -1679,7 +1698,7 @@ func fwFetchButton(v view, release, file, label string) templ.Component {
 		var templ_7745c5c3_Var75 string
 		templ_7745c5c3_Var75, templ_7745c5c3_Err = templ.ResolveAttributeValue(label + " " + file)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/firmware.templ`, Line: 405, Col: 74}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/firmware.templ`, Line: 424, Col: 74}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var75)
 		if templ_7745c5c3_Err != nil {
@@ -1692,7 +1711,7 @@ func fwFetchButton(v view, release, file, label string) templ.Component {
 		var templ_7745c5c3_Var76 string
 		templ_7745c5c3_Var76, templ_7745c5c3_Err = templ.JoinStringErrs(label)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/firmware.templ`, Line: 405, Col: 84}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/firmware.templ`, Line: 424, Col: 84}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var76))
 		if templ_7745c5c3_Err != nil {
@@ -1735,7 +1754,7 @@ func fwNotesDialog(v view, p firmwarePage, r releaseView) templ.Component {
 		var templ_7745c5c3_Var78 string
 		templ_7745c5c3_Var78, templ_7745c5c3_Err = templ.JoinStringErrs(r.Version)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/firmware.templ`, Line: 414, Col: 44}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/firmware.templ`, Line: 433, Col: 44}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var78))
 		if templ_7745c5c3_Err != nil {
@@ -1787,7 +1806,7 @@ func fwReleaseDetail(r releaseView) templ.Component {
 			var templ_7745c5c3_Var80 templ.SafeURL
 			templ_7745c5c3_Var80, templ_7745c5c3_Err = templ.JoinURLErrs(templ.SafeURL(r.URL))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/firmware.templ`, Line: 427, Col: 47}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/firmware.templ`, Line: 446, Col: 47}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var80))
 			if templ_7745c5c3_Err != nil {
@@ -1805,7 +1824,7 @@ func fwReleaseDetail(r releaseView) templ.Component {
 		var templ_7745c5c3_Var81 string
 		templ_7745c5c3_Var81, templ_7745c5c3_Err = templ.JoinStringErrs(olderHead(r))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/firmware.templ`, Line: 432, Col: 17}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/firmware.templ`, Line: 451, Col: 17}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var81))
 		if templ_7745c5c3_Err != nil {
@@ -1822,7 +1841,7 @@ func fwReleaseDetail(r releaseView) templ.Component {
 		var templ_7745c5c3_Var82 string
 		templ_7745c5c3_Var82, templ_7745c5c3_Err = templ.JoinStringErrs("Same version (" + strconv.Itoa(len(r.At)) + "):")
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/firmware.templ`, Line: 436, Col: 54}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/firmware.templ`, Line: 455, Col: 54}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var82))
 		if templ_7745c5c3_Err != nil {
@@ -1839,7 +1858,7 @@ func fwReleaseDetail(r releaseView) templ.Component {
 		var templ_7745c5c3_Var83 string
 		templ_7745c5c3_Var83, templ_7745c5c3_Err = templ.JoinStringErrs("Newer than this release (" + strconv.Itoa(len(r.Above)) + "):")
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/firmware.templ`, Line: 440, Col: 68}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/firmware.templ`, Line: 459, Col: 68}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var83))
 		if templ_7745c5c3_Err != nil {
@@ -1861,7 +1880,7 @@ func fwReleaseDetail(r releaseView) templ.Component {
 			var templ_7745c5c3_Var84 string
 			templ_7745c5c3_Var84, templ_7745c5c3_Err = templ.JoinStringErrs("Version unknown (" + strconv.Itoa(len(r.Unknown)) + "):")
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/firmware.templ`, Line: 445, Col: 63}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/firmware.templ`, Line: 464, Col: 63}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var84))
 			if templ_7745c5c3_Err != nil {
@@ -1951,7 +1970,7 @@ func fwDevs(ds []deviceRef) templ.Component {
 				var templ_7745c5c3_Var86 string
 				templ_7745c5c3_Var86, templ_7745c5c3_Err = templ.JoinStringErrs(" ")
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/firmware.templ`, Line: 474, Col: 8}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/firmware.templ`, Line: 493, Col: 8}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var86))
 				if templ_7745c5c3_Err != nil {
@@ -1965,7 +1984,7 @@ func fwDevs(ds []deviceRef) templ.Component {
 			var templ_7745c5c3_Var87 templ.SafeURL
 			templ_7745c5c3_Var87, templ_7745c5c3_Err = templ.JoinURLErrs(templ.SafeURL(d.Base + "/devices/" + strconv.FormatInt(int64(d.ID), 10)))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/firmware.templ`, Line: 476, Col: 102}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/firmware.templ`, Line: 495, Col: 102}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var87))
 			if templ_7745c5c3_Err != nil {
@@ -1978,7 +1997,7 @@ func fwDevs(ds []deviceRef) templ.Component {
 			var templ_7745c5c3_Var88 string
 			templ_7745c5c3_Var88, templ_7745c5c3_Err = templ.ResolveAttributeValue(d.Name)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/firmware.templ`, Line: 476, Col: 119}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/firmware.templ`, Line: 495, Col: 119}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var88)
 			if templ_7745c5c3_Err != nil {
@@ -1991,7 +2010,7 @@ func fwDevs(ds []deviceRef) templ.Component {
 			var templ_7745c5c3_Var89 string
 			templ_7745c5c3_Var89, templ_7745c5c3_Err = templ.JoinStringErrs(d.Name)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/firmware.templ`, Line: 476, Col: 130}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/firmware.templ`, Line: 495, Col: 130}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var89))
 			if templ_7745c5c3_Err != nil {
@@ -2133,7 +2152,7 @@ func fwNotes(blocks []firmware.NoteBlock) templ.Component {
 				var templ_7745c5c3_Var91 string
 				templ_7745c5c3_Var91, templ_7745c5c3_Err = templ.JoinStringErrs(b.Code)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/firmware.templ`, Line: 523, Col: 23}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/firmware.templ`, Line: 542, Col: 23}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var91))
 				if templ_7745c5c3_Err != nil {
@@ -2179,7 +2198,7 @@ func fwInlines(ins []firmware.Inline) templ.Component {
 				var templ_7745c5c3_Var93 templ.SafeURL
 				templ_7745c5c3_Var93, templ_7745c5c3_Err = templ.JoinURLErrs(templ.SafeURL(in.Href))
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/firmware.templ`, Line: 531, Col: 35}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/firmware.templ`, Line: 550, Col: 35}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var93))
 				if templ_7745c5c3_Err != nil {
@@ -2286,7 +2305,7 @@ func fwCache(v view, p firmwarePage) templ.Component {
 			var templ_7745c5c3_Var97 templ.SafeURL
 			templ_7745c5c3_Var97, templ_7745c5c3_Err = templ.JoinURLErrs(templ.SafeURL(v.Base + "/firmware/delete-selected"))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/firmware.templ`, Line: 549, Col: 85}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/firmware.templ`, Line: 568, Col: 85}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var97))
 			if templ_7745c5c3_Err != nil {
@@ -2299,7 +2318,7 @@ func fwCache(v view, p firmwarePage) templ.Component {
 			var templ_7745c5c3_Var98 string
 			templ_7745c5c3_Var98, templ_7745c5c3_Err = templ.ResolveAttributeValue(v.CSRF)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/firmware.templ`, Line: 550, Col: 53}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/firmware.templ`, Line: 569, Col: 53}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var98)
 			if templ_7745c5c3_Err != nil {
@@ -2318,7 +2337,7 @@ func fwCache(v view, p firmwarePage) templ.Component {
 					var templ_7745c5c3_Var99 string
 					templ_7745c5c3_Var99, templ_7745c5c3_Err = templ.ResolveAttributeValue(strconv.FormatInt(int64(a.ID), 10))
 					if templ_7745c5c3_Err != nil {
-						return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/firmware.templ`, Line: 553, Col: 81}
+						return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/firmware.templ`, Line: 572, Col: 81}
 					}
 					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var99)
 					if templ_7745c5c3_Err != nil {
@@ -2337,7 +2356,7 @@ func fwCache(v view, p firmwarePage) templ.Component {
 			var templ_7745c5c3_Var100 string
 			templ_7745c5c3_Var100, templ_7745c5c3_Err = templ.ResolveAttributeValue(plural(p.UnusedCount, "file") + " not needed by any transaction (" + humanBytes(p.UnusedSize) + ")")
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/firmware.templ`, Line: 556, Col: 156}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/firmware.templ`, Line: 575, Col: 156}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var100)
 			if templ_7745c5c3_Err != nil {
@@ -2350,7 +2369,7 @@ func fwCache(v view, p firmwarePage) templ.Component {
 			var templ_7745c5c3_Var101 string
 			templ_7745c5c3_Var101, templ_7745c5c3_Err = templ.JoinStringErrs(strconv.Itoa(p.UnusedCount))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/firmware.templ`, Line: 556, Col: 195}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/firmware.templ`, Line: 575, Col: 195}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var101))
 			if templ_7745c5c3_Err != nil {
@@ -2368,7 +2387,7 @@ func fwCache(v view, p firmwarePage) templ.Component {
 		var templ_7745c5c3_Var102 string
 		templ_7745c5c3_Var102, templ_7745c5c3_Err = templ.JoinStringErrs(plural(len(p.Artifacts), "file"))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/firmware.templ`, Line: 559, Col: 61}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/firmware.templ`, Line: 578, Col: 61}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var102))
 		if templ_7745c5c3_Err != nil {
@@ -2381,7 +2400,7 @@ func fwCache(v view, p firmwarePage) templ.Component {
 		var templ_7745c5c3_Var103 string
 		templ_7745c5c3_Var103, templ_7745c5c3_Err = templ.JoinStringErrs(sizeNoWrap(p.CacheSize))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/firmware.templ`, Line: 559, Col: 92}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/firmware.templ`, Line: 578, Col: 92}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var103))
 		if templ_7745c5c3_Err != nil {
@@ -2440,7 +2459,7 @@ func fwCacheRow(v view, p firmwarePage, a artifactView) templ.Component {
 		var templ_7745c5c3_Var105 string
 		templ_7745c5c3_Var105, templ_7745c5c3_Err = templ.ResolveAttributeValue(cacheTitle(a))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/firmware.templ`, Line: 573, Col: 53}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/firmware.templ`, Line: 592, Col: 53}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var105)
 		if templ_7745c5c3_Err != nil {
@@ -2454,7 +2473,7 @@ func fwCacheRow(v view, p firmwarePage, a artifactView) templ.Component {
 			var templ_7745c5c3_Var106 string
 			templ_7745c5c3_Var106, templ_7745c5c3_Err = templ.JoinStringErrs(a.Upload.Label)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/firmware.templ`, Line: 576, Col: 20}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/firmware.templ`, Line: 595, Col: 20}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var106))
 			if templ_7745c5c3_Err != nil {
@@ -2480,7 +2499,7 @@ func fwCacheRow(v view, p firmwarePage, a artifactView) templ.Component {
 					var templ_7745c5c3_Var107 templ.SafeURL
 					templ_7745c5c3_Var107, templ_7745c5c3_Err = templ.JoinURLErrs(templ.SafeURL(v.Base + "/transactions/" + strconv.FormatInt(int64(b), 10)))
 					if templ_7745c5c3_Err != nil {
-						return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/firmware.templ`, Line: 585, Col: 108}
+						return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/firmware.templ`, Line: 604, Col: 108}
 					}
 					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var107))
 					if templ_7745c5c3_Err != nil {
@@ -2493,7 +2512,7 @@ func fwCacheRow(v view, p firmwarePage, a artifactView) templ.Component {
 					var templ_7745c5c3_Var108 string
 					templ_7745c5c3_Var108, templ_7745c5c3_Err = templ.ResolveAttributeValue("Needed by " + a.NeededText() + "; it cannot be deleted until the transaction has ended")
 					if templ_7745c5c3_Err != nil {
-						return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/firmware.templ`, Line: 585, Col: 207}
+						return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/firmware.templ`, Line: 604, Col: 207}
 					}
 					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var108)
 					if templ_7745c5c3_Err != nil {
@@ -2506,7 +2525,7 @@ func fwCacheRow(v view, p firmwarePage, a artifactView) templ.Component {
 					var templ_7745c5c3_Var109 string
 					templ_7745c5c3_Var109, templ_7745c5c3_Err = templ.JoinStringErrs(strconv.FormatInt(int64(b), 10))
 					if templ_7745c5c3_Err != nil {
-						return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/firmware.templ`, Line: 585, Col: 254}
+						return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/firmware.templ`, Line: 604, Col: 254}
 					}
 					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var109))
 					if templ_7745c5c3_Err != nil {
@@ -2525,7 +2544,7 @@ func fwCacheRow(v view, p firmwarePage, a artifactView) templ.Component {
 				var templ_7745c5c3_Var110 string
 				templ_7745c5c3_Var110, templ_7745c5c3_Err = templ.ResolveAttributeValue("Needed by " + a.NeededText())
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/firmware.templ`, Line: 588, Col: 66}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/firmware.templ`, Line: 607, Col: 66}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var110)
 				if templ_7745c5c3_Err != nil {
@@ -2544,7 +2563,7 @@ func fwCacheRow(v view, p firmwarePage, a artifactView) templ.Component {
 			var templ_7745c5c3_Var111 templ.SafeURL
 			templ_7745c5c3_Var111, templ_7745c5c3_Err = templ.JoinURLErrs(templ.SafeURL(v.Base + "/firmware/artifacts/" + strconv.FormatInt(int64(a.ID), 10) + "/delete"))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/firmware.templ`, Line: 591, Col: 124}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/firmware.templ`, Line: 610, Col: 124}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var111))
 			if templ_7745c5c3_Err != nil {
@@ -2557,7 +2576,7 @@ func fwCacheRow(v view, p firmwarePage, a artifactView) templ.Component {
 			var templ_7745c5c3_Var112 string
 			templ_7745c5c3_Var112, templ_7745c5c3_Err = templ.ResolveAttributeValue("dlg-file-" + strconv.FormatInt(int64(a.ID), 10))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/firmware.templ`, Line: 591, Col: 189}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/firmware.templ`, Line: 610, Col: 189}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var112)
 			if templ_7745c5c3_Err != nil {
@@ -2570,7 +2589,7 @@ func fwCacheRow(v view, p firmwarePage, a artifactView) templ.Component {
 			var templ_7745c5c3_Var113 string
 			templ_7745c5c3_Var113, templ_7745c5c3_Err = templ.ResolveAttributeValue("Delete " + a.Release + " " + a.Filename)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/firmware.templ`, Line: 591, Col: 245}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/firmware.templ`, Line: 610, Col: 245}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var113)
 			if templ_7745c5c3_Err != nil {
@@ -2593,7 +2612,7 @@ func fwCacheRow(v view, p firmwarePage, a artifactView) templ.Component {
 			var templ_7745c5c3_Var114 string
 			templ_7745c5c3_Var114, templ_7745c5c3_Err = templ.JoinStringErrs(a.Release)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/firmware.templ`, Line: 596, Col: 22}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/firmware.templ`, Line: 615, Col: 22}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var114))
 			if templ_7745c5c3_Err != nil {
@@ -2607,7 +2626,7 @@ func fwCacheRow(v view, p firmwarePage, a artifactView) templ.Component {
 			var templ_7745c5c3_Var115 string
 			templ_7745c5c3_Var115, templ_7745c5c3_Err = templ.JoinStringErrs(a.Release)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/firmware.templ`, Line: 598, Col: 15}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/firmware.templ`, Line: 617, Col: 15}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var115))
 			if templ_7745c5c3_Err != nil {
@@ -2625,7 +2644,7 @@ func fwCacheRow(v view, p firmwarePage, a artifactView) templ.Component {
 		var templ_7745c5c3_Var116 string
 		templ_7745c5c3_Var116, templ_7745c5c3_Err = templ.JoinStringErrs(sizeNoWrap(a.Size))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/firmware.templ`, Line: 600, Col: 26}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/firmware.templ`, Line: 619, Col: 26}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var116))
 		if templ_7745c5c3_Err != nil {
@@ -2638,7 +2657,7 @@ func fwCacheRow(v view, p firmwarePage, a artifactView) templ.Component {
 		var templ_7745c5c3_Var117 string
 		templ_7745c5c3_Var117, templ_7745c5c3_Err = templ.ResolveAttributeValue(stamp(a.FetchedAt))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/firmware.templ`, Line: 601, Col: 38}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/firmware.templ`, Line: 620, Col: 38}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var117)
 		if templ_7745c5c3_Err != nil {
@@ -2659,7 +2678,7 @@ func fwCacheRow(v view, p firmwarePage, a artifactView) templ.Component {
 		var templ_7745c5c3_Var118 string
 		templ_7745c5c3_Var118, templ_7745c5c3_Err = templ.JoinStringErrs(shortDay(p.Now, a.FetchedAt))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/firmware.templ`, Line: 601, Col: 120}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/firmware.templ`, Line: 620, Col: 120}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var118))
 		if templ_7745c5c3_Err != nil {
@@ -2672,7 +2691,7 @@ func fwCacheRow(v view, p firmwarePage, a artifactView) templ.Component {
 		var templ_7745c5c3_Var119 string
 		templ_7745c5c3_Var119, templ_7745c5c3_Err = templ.ResolveAttributeValue(a.SHA256)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/firmware.templ`, Line: 603, Col: 39}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/firmware.templ`, Line: 622, Col: 39}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var119)
 		if templ_7745c5c3_Err != nil {
@@ -2685,7 +2704,7 @@ func fwCacheRow(v view, p firmwarePage, a artifactView) templ.Component {
 		var templ_7745c5c3_Var120 string
 		templ_7745c5c3_Var120, templ_7745c5c3_Err = templ.JoinStringErrs(shortHash(a.SHA256))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/firmware.templ`, Line: 603, Col: 87}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/firmware.templ`, Line: 622, Col: 87}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var120))
 		if templ_7745c5c3_Err != nil {
@@ -2706,7 +2725,8 @@ func cacheTitle(a artifactView) string {
 		s += ", uploaded as " + a.Upload.OriginalName
 	}
 	if len(a.Devices) > 0 {
-		s += "; installed on " + devNames(a.Devices)
+		s += "; installed on "
+		s += devNames(a.Devices, tooltipMax-len(s))
 	}
 	return s
 }
@@ -2740,7 +2760,7 @@ func fwDeleteDialog(v view, p firmwarePage, a artifactView) templ.Component {
 		var templ_7745c5c3_Var122 string
 		templ_7745c5c3_Var122, templ_7745c5c3_Err = templ.ResolveAttributeValue("dlg-file-" + strconv.FormatInt(int64(a.ID), 10))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/firmware.templ`, Line: 621, Col: 62}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/firmware.templ`, Line: 641, Col: 62}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var122)
 		if templ_7745c5c3_Err != nil {
@@ -2753,7 +2773,7 @@ func fwDeleteDialog(v view, p firmwarePage, a artifactView) templ.Component {
 		var templ_7745c5c3_Var123 string
 		templ_7745c5c3_Var123, templ_7745c5c3_Err = templ.ResolveAttributeValue("dlg-file-" + strconv.FormatInt(int64(a.ID), 10) + "-h")
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/firmware.templ`, Line: 621, Col: 151}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/firmware.templ`, Line: 641, Col: 151}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var123)
 		if templ_7745c5c3_Err != nil {
@@ -2766,7 +2786,7 @@ func fwDeleteDialog(v view, p firmwarePage, a artifactView) templ.Component {
 		var templ_7745c5c3_Var124 templ.SafeURL
 		templ_7745c5c3_Var124, templ_7745c5c3_Err = templ.JoinURLErrs(templ.SafeURL(v.Base + "/firmware/artifacts/" + strconv.FormatInt(int64(a.ID), 10) + "/delete"))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/firmware.templ`, Line: 622, Col: 126}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/firmware.templ`, Line: 642, Col: 126}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var124))
 		if templ_7745c5c3_Err != nil {
@@ -2779,7 +2799,7 @@ func fwDeleteDialog(v view, p firmwarePage, a artifactView) templ.Component {
 		var templ_7745c5c3_Var125 string
 		templ_7745c5c3_Var125, templ_7745c5c3_Err = templ.ResolveAttributeValue(v.CSRF)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/firmware.templ`, Line: 623, Col: 50}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/firmware.templ`, Line: 643, Col: 50}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var125)
 		if templ_7745c5c3_Err != nil {
@@ -2797,7 +2817,7 @@ func fwDeleteDialog(v view, p firmwarePage, a artifactView) templ.Component {
 			var templ_7745c5c3_Var126 string
 			templ_7745c5c3_Var126, templ_7745c5c3_Err = templ.ResolveAttributeValue("dlg-file-" + strconv.FormatInt(int64(a.ID), 10) + "-h")
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/firmware.templ`, Line: 626, Col: 68}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/firmware.templ`, Line: 646, Col: 68}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var126)
 			if templ_7745c5c3_Err != nil {
@@ -2810,7 +2830,7 @@ func fwDeleteDialog(v view, p firmwarePage, a artifactView) templ.Component {
 			var templ_7745c5c3_Var127 string
 			templ_7745c5c3_Var127, templ_7745c5c3_Err = templ.JoinStringErrs(a.Upload.Label)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/firmware.templ`, Line: 626, Col: 94}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/firmware.templ`, Line: 646, Col: 94}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var127))
 			if templ_7745c5c3_Err != nil {
@@ -2828,7 +2848,7 @@ func fwDeleteDialog(v view, p firmwarePage, a artifactView) templ.Component {
 			var templ_7745c5c3_Var128 string
 			templ_7745c5c3_Var128, templ_7745c5c3_Err = templ.ResolveAttributeValue("dlg-file-" + strconv.FormatInt(int64(a.ID), 10) + "-h")
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/firmware.templ`, Line: 629, Col: 68}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/firmware.templ`, Line: 649, Col: 68}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var128)
 			if templ_7745c5c3_Err != nil {
@@ -2841,7 +2861,7 @@ func fwDeleteDialog(v view, p firmwarePage, a artifactView) templ.Component {
 			var templ_7745c5c3_Var129 string
 			templ_7745c5c3_Var129, templ_7745c5c3_Err = templ.JoinStringErrs(a.Filename)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/firmware.templ`, Line: 629, Col: 90}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/firmware.templ`, Line: 649, Col: 90}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var129))
 			if templ_7745c5c3_Err != nil {
@@ -2854,7 +2874,7 @@ func fwDeleteDialog(v view, p firmwarePage, a artifactView) templ.Component {
 			var templ_7745c5c3_Var130 string
 			templ_7745c5c3_Var130, templ_7745c5c3_Err = templ.JoinStringErrs(a.Release)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/firmware.templ`, Line: 629, Col: 105}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/firmware.templ`, Line: 649, Col: 105}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var130))
 			if templ_7745c5c3_Err != nil {
@@ -2867,7 +2887,7 @@ func fwDeleteDialog(v view, p firmwarePage, a artifactView) templ.Component {
 			var templ_7745c5c3_Var131 string
 			templ_7745c5c3_Var131, templ_7745c5c3_Err = templ.JoinStringErrs(waitingText(a))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/firmware.templ`, Line: 630, Col: 41}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/firmware.templ`, Line: 650, Col: 41}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var131))
 			if templ_7745c5c3_Err != nil {
@@ -2885,7 +2905,7 @@ func fwDeleteDialog(v view, p firmwarePage, a artifactView) templ.Component {
 		var templ_7745c5c3_Var132 string
 		templ_7745c5c3_Var132, templ_7745c5c3_Err = templ.JoinStringErrs(sizeNoWrap(a.Size))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/firmware.templ`, Line: 633, Col: 66}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/firmware.templ`, Line: 653, Col: 66}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var132))
 		if templ_7745c5c3_Err != nil {
@@ -2898,7 +2918,7 @@ func fwDeleteDialog(v view, p firmwarePage, a artifactView) templ.Component {
 		var templ_7745c5c3_Var133 string
 		templ_7745c5c3_Var133, templ_7745c5c3_Err = templ.ResolveAttributeValue(a.SHA256)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/firmware.templ`, Line: 634, Col: 78}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/firmware.templ`, Line: 654, Col: 78}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var133)
 		if templ_7745c5c3_Err != nil {
@@ -2911,7 +2931,7 @@ func fwDeleteDialog(v view, p firmwarePage, a artifactView) templ.Component {
 		var templ_7745c5c3_Var134 string
 		templ_7745c5c3_Var134, templ_7745c5c3_Err = templ.JoinStringErrs(shortHash(a.SHA256))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/firmware.templ`, Line: 634, Col: 102}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/firmware.templ`, Line: 654, Col: 102}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var134))
 		if templ_7745c5c3_Err != nil {
@@ -2924,7 +2944,7 @@ func fwDeleteDialog(v view, p firmwarePage, a artifactView) templ.Component {
 		var templ_7745c5c3_Var135 string
 		templ_7745c5c3_Var135, templ_7745c5c3_Err = templ.ResolveAttributeValue(a.SHA256)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/firmware.templ`, Line: 634, Col: 177}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/firmware.templ`, Line: 654, Col: 177}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var135)
 		if templ_7745c5c3_Err != nil {
@@ -2937,7 +2957,7 @@ func fwDeleteDialog(v view, p firmwarePage, a artifactView) templ.Component {
 		var templ_7745c5c3_Var136 string
 		templ_7745c5c3_Var136, templ_7745c5c3_Err = templ.ResolveAttributeValue("Copy the SHA-256 of " + a.Filename)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/firmware.templ`, Line: 634, Col: 228}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/firmware.templ`, Line: 654, Col: 228}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var136)
 		if templ_7745c5c3_Err != nil {
@@ -3008,7 +3028,7 @@ func fwUploadForm(v view, inDialog bool) templ.Component {
 		var templ_7745c5c3_Var138 string
 		templ_7745c5c3_Var138, templ_7745c5c3_Err = templ.ResolveAttributeValue(v.Base + CustomUploadPath)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/firmware.templ`, Line: 665, Col: 60}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/firmware.templ`, Line: 685, Col: 60}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var138)
 		if templ_7745c5c3_Err != nil {

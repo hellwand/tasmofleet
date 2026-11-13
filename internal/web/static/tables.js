@@ -664,8 +664,12 @@
     window.clearTimeout(timers[key]);
     var rec = { snap: snapshot(table), done: 0 };
     recent[key] = rec;
+    // Measured now, not when the timer runs: a list update can replace the table inside the
+    // 400 ms, and the table this was called for then measures 0 px in every column, which was
+    // saved as the minimum weight everywhere (the whole layout lost, #727).
+    var doc = document_(table);
     var run = function () {
-      post(key, document_(table)).then(function (ok) {
+      post(key, doc).then(function (ok) {
         rec.done = ok ? Date.now() : Infinity;
       });
     };

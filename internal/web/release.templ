@@ -165,7 +165,7 @@ templ relFiles(v view, p releasePage) {
 			<div class="rel-file">
 				<span class="rel-file-t">
 					<span class="rel-file-n">@ui.Soft(f.Name)</span>
-					<span class="rel-file-m" title={ devNames(f.UsedBy) }>{ fileMeta(f) }</span>
+					<span class="rel-file-m" title={ devNames(f.UsedBy, tooltipMax) }>{ fileMeta(f) }</span>
 				</span>
 				switch {
 					case f.Missing:

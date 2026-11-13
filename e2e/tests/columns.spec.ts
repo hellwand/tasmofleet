@@ -89,6 +89,23 @@ const width = async (page: Page, table: string, name: string) => {
     .toBeGreaterThan(0);
   return w;
 };
+// The same one-step read for a resize handle: Locator.boundingBox() returns null (and the test then
+// dies on box.x) when a live reload replaces the table between finding the handle and measuring it.
+const handleBox = async (page: Page, name: string) => {
+  let box = { x: 0, y: 0, width: 0, height: 0 };
+  await expect
+    .poll(
+      async () =>
+        (box = await page.evaluate((n) => {
+          const h = [...document.querySelectorAll('[role="separator"]')].find((e) => e.getAttribute("aria-label") === `Resize column ${n}`);
+          const r = h ? h.getBoundingClientRect() : new DOMRect();
+          return { x: r.x, y: r.y, width: r.width, height: r.height };
+        }, name)).width,
+      { timeout: 15_000 },
+    )
+    .toBeGreaterThan(0);
+  return box;
+};
 const saved = (page: Page, key: string) => page.waitForResponse((r) => r.url().endsWith(`/prefs/${key}`) && r.request().method() === "POST" && r.status() === 204);
 
 /** a second browser of the same user: own cookies, own storage */
@@ -120,8 +137,7 @@ test("dragging a column edge resizes it; the width survives a reload and a secon
   await page.goto(app.url + "/devices");
   await resetAll(page, "/devices", "table.devices");
   const before = await width(page, "devices", "Firmware");
-  const handle = page.getByRole("separator", { name: "Resize column Firmware" });
-  const box = (await handle.boundingBox())!;
+  const box = await handleBox(page, "Firmware");
   const done = saved(page, "table.devices");
   await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
   await page.mouse.down();
@@ -339,6 +355,48 @@ test("a list update during keyboard resizing keeps the new width and the focused
   await resetAll(page, "/devices", "table.devices");
 });
 
+// The width of a column is saved 400 ms after the last arrow key. Why this matters: when a list update
+// replaced the table inside that delay, the save measured the table it was started for, which is no
+// longer in the page and measures 0 px everywhere, so every column was saved at the minimum weight and
+// the user's whole layout became equal-width columns until they set it again (found as the flaky
+// "keyboard resizing" test with 60 devices, where a list update is always on its way). The clock is
+// held so the update lands inside the delay however fast or slow the machine is.
+test("a list update inside the save delay does not save the replaced table as the layout", async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await page.setExtraHTTPHeaders(adam);
+  await page.clock.install();
+  await page.goto(app.url + "/devices");
+  await resetAll(page, "/devices", "table.devices");
+  const handle = page.getByRole("separator", { name: "Resize column Status" });
+  await handle.focus();
+  await width(page, "devices", "Status");
+  await page.clock.pauseAt(Date.now() + 5_000);
+  for (let i = 0; i < 5; i++) await page.keyboard.press("ArrowLeft");
+  const w1 = await width(page, "devices", "Status");
+
+  // the update replaces the table; the save has not run (the page's timers stand still)
+  await page.evaluate(
+    () =>
+      new Promise<void>((resolve) => {
+        document.addEventListener("htmx:afterSwap", (e) => (e as CustomEvent).detail.target.id === "devtable" && resolve());
+        const t = document.getElementById("devtable")!;
+        t.querySelector("table")!.setAttribute("data-old", "");
+        (window as any).htmx.ajax("GET", t.getAttribute("hx-get")!, { target: t, swap: "innerHTML" });
+      }),
+  );
+  await expect(page.locator('#devtable table[data-table="devices"]:not([data-old])')).toHaveCount(1);
+
+  // now the save runs
+  const request = page.waitForRequest((r) => r.url().endsWith("/prefs/table.devices") && r.method() === "POST");
+  await page.clock.runFor(1_000);
+  const doc = JSON.parse((await request).postData() ?? "{}");
+  // tenths of the pixels; 3 is the smallest weight a column can be saved with
+  expect(doc.w.status * 10).toBeGreaterThan(w1 - 5);
+  expect(doc.w.status * 10).toBeLessThan(w1 + 5);
+  expect(Object.values(doc.w as Record<string, number>).filter((x) => x <= 3)).toEqual([]);
+  await resetAll(page, "/devices", "table.devices");
+});
+
 // A device event reloads the list (sse:device, 500 ms after a burst) and replaces the table, its
 // handles and the one under the mouse. Why: when that lands while the user drags a column edge, the
 // drag must go on and the width must still be saved; before, the release went to the removed handle,
@@ -350,7 +408,7 @@ test("a list update during a mouse drag keeps resizing and saves the width", asy
   await page.goto(app.url + "/devices");
   await resetAll(page, "/devices", "table.devices");
   const before = await width(page, "devices", "Firmware");
-  const box = (await page.getByRole("separator", { name: "Resize column Firmware" }).boundingBox())!;
+  const box = await handleBox(page, "Firmware");
   const x = box.x + box.width / 2,
     y = box.y + box.height / 2;
   const done = saved(page, "table.devices");

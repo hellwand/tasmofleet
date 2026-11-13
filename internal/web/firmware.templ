@@ -360,7 +360,7 @@ templ fwFileRow(v view, p firmwarePage, r releaseView, f fileView) {
 	<div class="fw-file">
 		<span class="fw-file-n">@ui.Soft(f.Name)</span>
 		<span class="fw-file-c">{ f.Chip }</span>
-		<span class="fw-file-d" title={ devNames(f.UsedBy) }>{ plural(len(f.UsedBy), "device") }</span>
+		<span class="fw-file-d" title={ devNames(f.UsedBy, tooltipMax) }>{ plural(len(f.UsedBy), "device") }</span>
 		<span class="fw-file-s">
 			if f.Size > 0 {
 				{ sizeNoWrap(f.Size) }
@@ -388,13 +388,32 @@ templ fwFileRow(v view, p firmwarePage, r releaseView, f fileView) {
 	</div>
 }
 
-// devNames lists device names for a title.
-func devNames(ds []deviceRef) string {
-	names := make([]string, 0, len(ds))
-	for _, d := range ds {
-		names = append(names, d.Name)
+// tooltipMax is the longest a title may be; tests/columns.spec.ts checks the rendered pages.
+const tooltipMax = 160
+
+// noLimit lists every device, for text that is shown on the page and not as a title.
+const noLimit = int(^uint(0) >> 1)
+
+// devNames lists device names, at most limit characters of them; the names that do not fit are
+// counted ("a, b and 3 more"). The first name is always shown.
+func devNames(ds []deviceRef, limit int) string {
+	var b strings.Builder
+	for i, d := range ds {
+		sep := ", "
+		if i == 0 {
+			sep = ""
+		}
+		left := len(ds) - i - 1
+		rest := ""
+		if left > 0 {
+			rest = " and " + strconv.Itoa(left) + " more"
+		}
+		if i > 0 && b.Len()+len(sep)+len(d.Name)+len(rest) > limit {
+			return b.String() + " and " + strconv.Itoa(len(ds)-i) + " more"
+		}
+		b.WriteString(sep + d.Name)
 	}
-	return strings.Join(names, ", ")
+	return b.String()
 }
 
 templ fwFetchButton(v view, release, file, label string) {
@@ -611,7 +630,8 @@ func cacheTitle(a artifactView) string {
 		s += ", uploaded as " + a.Upload.OriginalName
 	}
 	if len(a.Devices) > 0 {
-		s += "; installed on " + devNames(a.Devices)
+		s += "; installed on "
+		s += devNames(a.Devices, tooltipMax-len(s))
 	}
 	return s
 }

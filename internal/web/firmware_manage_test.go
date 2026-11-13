@@ -3,6 +3,7 @@ package web
 import (
 	"context"
 	"fmt"
+	"html"
 	"net/url"
 	"regexp"
 	"slices"
@@ -433,5 +434,92 @@ func TestUsedByTextExplainsTheDevicesThatNeedNoDownload(t *testing.T) {
 	}
 	if got := usedByText(artifactView{Devices: ds, Waiting: 3}); strings.Contains(got, "already") {
 		t.Errorf("all devices wait, nothing to explain: %q", got)
+	}
+}
+
+// Why: the tooltip of a firmware file's device count names its devices, and the UI promises that no
+// tooltip is longer than 160 characters (columns.spec "never a page dump"). With a real fleet one
+// file is used by dozens of devices; the full list made a 500-character bubble. The tooltip keeps as
+// many names as fit and says how many it left out, so the count in the text still adds up.
+func TestDevNamesFitATooltipAndCountWhatItLeavesOut(t *testing.T) {
+	var ds []deviceRef
+	for i := range 60 {
+		ds = append(ds, deviceRef{Name: fmt.Sprintf("workshop-light-%02d", i)})
+	}
+	got := fileRowTitle(t, ds)
+	if len(got) > 160 {
+		t.Fatalf("tooltip is %d characters, want at most 160: %q", len(got), got)
+	}
+	m := regexp.MustCompile(`^(.+) and (\d+) more$`).FindStringSubmatch(got)
+	if m == nil {
+		t.Fatalf("a cut list must end with how many names it left out, got %q", got)
+	}
+	shown := strings.Count(m[1], ", ") + 1
+	if left := fmt.Sprint(len(ds) - shown); m[2] != left {
+		t.Errorf("says %s more, but %d of %d names are shown (%s left out): %q", m[2], shown, len(ds), left, got)
+	}
+	if !strings.HasPrefix(got, "workshop-light-00, workshop-light-01") {
+		t.Errorf("the list keeps the order of the devices: %q", got)
+	}
+
+	// a short list is shown whole, without a count
+	short := []deviceRef{{Name: "a"}, {Name: "b"}, {Name: "c"}}
+	if got := fileRowTitle(t, short); got != "a, b, c" {
+		t.Errorf("short list changed: %q", got)
+	}
+}
+
+// fileRowTitle renders one file row of the Firmware page and returns the title of its device count.
+func fileRowTitle(t *testing.T, ds []deviceRef) string {
+	t.Helper()
+	var b strings.Builder
+	if err := fwFileRow(view{}, firmwarePage{}, releaseView{}, fileView{Name: "tasmota.bin", UsedBy: ds}).Render(context.Background(), &b); err != nil {
+		t.Fatal(err)
+	}
+	m := regexp.MustCompile(`class="fw-file-d" title="([^"]*)"`).FindStringSubmatch(b.String())
+	if m == nil {
+		t.Fatalf("no device count in the row: %s", b.String())
+	}
+	return html.UnescapeString(m[1])
+}
+
+// Why: the title of a cached file's row is longer than the device list in it ("CHIP / build, from
+// source, uploaded as ...; installed on <devices>"), and the tooltip rule counts the whole title.
+// With a real fleet a cached upstream file is installed on dozens of devices, and the title was
+// 189 characters. The device names get only the room the rest of the title leaves.
+func TestCacheTitleFitsATooltipAndCountsWhatItLeavesOut(t *testing.T) {
+	var ds []deviceRef
+	for i := range 34 {
+		ds = append(ds, deviceRef{Name: fmt.Sprintf("workshop-light-%02d", i)})
+	}
+	got := cacheTitle(artifactView{Family: "esp8266", Variant: "tasmota", Source: "github", Devices: ds})
+	if len(got) > 160 {
+		t.Fatalf("title is %d characters, want at most 160: %q", len(got), got)
+	}
+	m := regexp.MustCompile(`installed on (.+) and (\d+) more$`).FindStringSubmatch(got)
+	if m == nil {
+		t.Fatalf("a cut list must end with how many names it left out, got %q", got)
+	}
+	shown := strings.Count(m[1], ", ") + 1
+	if left := fmt.Sprint(len(ds) - shown); m[2] != left {
+		t.Errorf("says %s more, but %d of %d names are shown (%s left out): %q", m[2], shown, len(ds), left, got)
+	}
+}
+
+// Why: the file detail page prints the devices as text, not as a tooltip. A cut there would hide
+// devices on a page whose job is to say who runs the file, next to the sentence that counts them.
+func TestUsedByTextNamesEveryDevice(t *testing.T) {
+	var ds []deviceRef
+	for i := range 60 {
+		ds = append(ds, deviceRef{Name: fmt.Sprintf("workshop-light-%02d", i)})
+	}
+	got := usedByText(artifactView{Devices: ds})
+	for _, d := range ds {
+		if !strings.Contains(got, d.Name) {
+			t.Fatalf("%s is missing from the list of devices: %q", d.Name, got)
+		}
+	}
+	if strings.Contains(got, " more") {
+		t.Errorf("the page text must not cut the list: %q", got)
 	}
 }

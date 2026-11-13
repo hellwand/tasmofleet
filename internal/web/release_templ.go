@@ -586,9 +586,9 @@ func relFiles(v view, p releasePage) templ.Component {
 				return templ_7745c5c3_Err
 			}
 			var templ_7745c5c3_Var23 string
-			templ_7745c5c3_Var23, templ_7745c5c3_Err = templ.ResolveAttributeValue(devNames(f.UsedBy))
+			templ_7745c5c3_Var23, templ_7745c5c3_Err = templ.ResolveAttributeValue(devNames(f.UsedBy, tooltipMax))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/release.templ`, Line: 168, Col: 56}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/release.templ`, Line: 168, Col: 68}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var23)
 			if templ_7745c5c3_Err != nil {
@@ -601,7 +601,7 @@ func relFiles(v view, p releasePage) templ.Component {
 			var templ_7745c5c3_Var24 string
 			templ_7745c5c3_Var24, templ_7745c5c3_Err = templ.JoinStringErrs(fileMeta(f))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/release.templ`, Line: 168, Col: 72}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/release.templ`, Line: 168, Col: 84}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var24))
 			if templ_7745c5c3_Err != nil {
