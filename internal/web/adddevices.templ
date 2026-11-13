@@ -629,7 +629,7 @@ templ scanLive(b scanBodyView) {
 					</div>
 				}
 			</div>
-			if len(b.Rows) == 0 && b.More == 0 {
+			if len(b.Rows) == 0 {
 				<div class="uempty add-empty">
 					<div class="uempty-icon" aria-hidden="true"><span></span></div>
 					if b.Running {
@@ -644,7 +644,9 @@ templ scanLive(b scanBodyView) {
 				<div class="add-table add-scan-table">
 					<table>
 						<colgroup>
-							<col class="c-sel"/>
+							if b.Selectable {
+								<col class="c-sel"/>
+							}
 							<col class="c-name"/>
 							<col class="c-ip"/>
 							<col class="c-mac"/>
@@ -654,11 +656,9 @@ templ scanLive(b scanBodyView) {
 						</colgroup>
 						<thead>
 							<tr>
-								<th class="sel">
-									if b.Selectable {
-										<input type="checkbox" data-select-all hidden aria-label="Select all"/>
-									}
-								</th>
+								if b.Selectable {
+									<th class="sel"><input type="checkbox" data-select-all hidden aria-label="Select all"/></th>
+								}
 								<th>Name</th>
 								<th>IP</th>
 								<th>MAC</th>
@@ -670,15 +670,22 @@ templ scanLive(b scanBodyView) {
 						<tbody>
 							for _, r := range b.Rows {
 								<tr>
-									<td class="sel">
-										if r.Kind == "new" {
-											<input type="checkbox" name="id" value={ strconv.FormatInt(r.ProposalID, 10) + ":" + r.Version } aria-label={ "Select " + r.Name }/>
-										}
-									</td>
+									if b.Selectable {
+										<td class="sel">
+											if r.Kind == "new" {
+												<input type="checkbox" name="id" value={ strconv.FormatInt(r.ProposalID, 10) + ":" + r.Version } aria-label={ "Select " + r.Name }/>
+											}
+										</td>
+									}
 									<td class="name" title={ r.Name }><span class="add-label">{ r.Name }</span></td>
 									<td class="mono" title={ r.Address } data-visual-mask>{ r.Address }</td>
 									<td class="mono add-t2" title={ r.MAC } data-visual-mask>{ r.MAC }</td>
-									<td class="mono">{ dash(r.Firmware) }</td>
+									<td
+										class="mono"
+										if r.FirmwareTip != "" {
+											title={ r.FirmwareTip }
+										}
+									>{ dash(r.Firmware) }</td>
 									<td>
 										@ui.Badge(r.Tone, r.Label)
 									</td>
@@ -689,9 +696,6 @@ templ scanLive(b scanBodyView) {
 							}
 						</tbody>
 					</table>
-					if b.More > 0 {
-						<a class="add-more-known" href={ templ.SafeURL(b.MoreHref) }>and { strconv.Itoa(b.More) } more known devices</a>
-					}
 				</div>
 				<div class="add-cards">
 					for _, r := range b.Rows {
@@ -708,9 +712,6 @@ templ scanLive(b scanBodyView) {
 								</div>
 							</div>
 						</div>
-					}
-					if b.More > 0 {
-						<a class="add-more-known" href={ templ.SafeURL(b.MoreHref) }>and { strconv.Itoa(b.More) } more known devices</a>
 					}
 				</div>
 			}

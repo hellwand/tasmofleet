@@ -824,3 +824,76 @@ export async function cardStackGaps(page: Page, maxGap = 17): Promise<string[]> 
     return out;
   }, maxGap);
 }
+
+/** The bubble the shared tooltip shows for an element, and which other rows' text it covers. */
+export interface TipReport {
+  tip: { text: string; top: number; bottom: number; left: number; right: number } | null;
+  /** rows (by index) whose text lies under the bubble; the row of the hovered element is not listed */
+  covers: string[];
+}
+
+/**
+ * hoverTip puts the pointer on `target` (a Locator inside a row of `rowsSel`), waits for the bubble
+ * (it comes after 350 ms) and reports what it covers of the text of the OTHER rows of that table: a
+ * bubble beside its own row may cover that row, never its neighbours (#811). Text of a cell is
+ * measured as the text the cell shows (cut to the cell), so a cut-off value's hidden tail is not text.
+ */
+export async function hoverTip(page: Page, target: Locator, rowsSel: string, position?: { x: number; y: number }): Promise<TipReport> {
+  await page.mouse.move(0, 0);
+  // The box is taken before the hover: the first hover moves a title into data-tip, and a selector on
+  // title no longer finds the element.
+  // The page swaps rows live; an element that is replaced while it is scrolled to or hovered is looked up again.
+  let y = -1;
+  for (let attempt = 1; ; attempt++) {
+    try {
+      await target.scrollIntoViewIfNeeded();
+      const box = await target.boundingBox();
+      y = box ? box.y + (position?.y ?? box.height / 2) : -1;
+      await target.hover({ position });
+      break;
+    } catch (e) {
+      if (attempt >= 4 || !/not attached|detached/i.test(String(e))) throw e;
+    }
+  }
+  await page.waitForTimeout(800);
+  return page.evaluate(
+    ([sel, y]) => {
+      const tip = document.querySelector<HTMLElement>(".tooltip:not([hidden])");
+      if (!tip) return { tip: null, covers: [] as string[] };
+      const t = tip.getBoundingClientRect();
+      const covers: string[] = [];
+      const rows = [...document.querySelectorAll(sel as string)];
+      // the owner of the bubble marks itself with aria-describedby; when a live refresh replaced it, the
+      // row under the pointer stands in. With neither the report cannot say which row is the element's own.
+      const owner = document.querySelector("[aria-describedby=tf-tooltip]")?.closest(sel as string);
+      let own = owner ? rows.indexOf(owner) : -1;
+      if (own < 0) {
+        own = rows.findIndex((tr) => {
+          const b = tr.getBoundingClientRect();
+          return b.top <= (y as number) && (y as number) < b.bottom;
+        });
+      }
+      if (own < 0) return { tip: null, covers: [] as string[] };
+      rows.forEach((tr, i) => {
+        if (i === own) return;
+        const name = (tr.querySelector("td")?.textContent ?? "").trim().slice(0, 30) || `row ${i}`;
+        for (const td of tr.querySelectorAll("td")) {
+          const c = td.getBoundingClientRect();
+          const w = document.createTreeWalker(td, NodeFilter.SHOW_TEXT);
+          for (let n = w.nextNode(); n; n = w.nextNode()) {
+            if (!n.textContent?.trim()) continue;
+            const rg = document.createRange();
+            rg.selectNodeContents(n);
+            for (const q of rg.getClientRects()) {
+              const l = Math.max(q.left, c.left), r = Math.min(q.right, c.right);
+              if (q.width < 1 || q.height < 1 || r <= l) continue;
+              if (Math.min(r, t.right) - Math.max(l, t.left) > 1 && Math.min(q.bottom, t.bottom) - Math.max(q.top, t.top) > 1) covers.push(`row ${i} (${name})`);
+            }
+          }
+        }
+      });
+      return { tip: { text: tip.textContent ?? "", top: t.top, bottom: t.bottom, left: t.left, right: t.right }, covers: [...new Set(covers)] };
+    },
+    [rowsSel, y] as const,
+  );
+}

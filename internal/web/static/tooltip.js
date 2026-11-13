@@ -5,6 +5,9 @@
 // to this one (pages without this script keep the native title). Texts are
 // capped at 160 characters: tooltips explain, they do not list data.
 // Mouse hover (after a short delay) and keyboard focus; never on touch.
+// Two rules for table cells (#811). A title that only repeats the element's own text exists for the
+// day the text is cut off, so it shows only then. And a bubble for an element inside a cell sits
+// beside it, not below it: a cell fills its whole row, so "below" is the next row's text.
 (function () {
   "use strict";
 
@@ -49,11 +52,87 @@
     }
   }
 
+  function norm(s) {
+    return (s || "").replace(/\s+/g, " ").trim();
+  }
+
+  // cutOff: the element, or something inside it, hides part of its content (overflow hidden or
+  // clipped with an ellipsis).
+  function cutOff(el) {
+    var all = [el].concat(Array.prototype.slice.call(el.querySelectorAll("*")));
+    return all.some(function (x) {
+      if (
+        x.scrollWidth <= x.clientWidth + 1 &&
+        x.scrollHeight <= x.clientHeight + 1
+      ) {
+        return false;
+      }
+      var cs = window.getComputedStyle(x);
+      return cs.overflowX !== "visible" || cs.overflowY !== "visible";
+    });
+  }
+
+  // repeats: the tooltip says nothing but what the element already shows.
+  function repeats(target, text) {
+    var own = norm(target.textContent);
+    return own !== "" && own.indexOf(norm(text)) >= 0;
+  }
+
+  // reveal: the tooltip is the full text of the element (it starts with what is shown).
+  function reveal(target, text) {
+    var own = norm(target.textContent);
+    return own !== "" && norm(text).indexOf(own) === 0;
+  }
+
+  // textBox is the box of the element's text, cut to the element: the end of the text where it fits,
+  // the edge of the element where it is cut off.
+  function textBox(target) {
+    var r = target.getBoundingClientRect(),
+      rg = document.createRange();
+    rg.selectNodeContents(target);
+    var q = rg.getBoundingClientRect();
+    if (!q.width || !q.height) {
+      return r;
+    }
+    return {
+      left: Math.max(q.left, r.left),
+      right: Math.min(q.right, r.right),
+      top: Math.max(q.top, r.top),
+      bottom: Math.min(q.bottom, r.bottom),
+    };
+  }
+
+  // placeBeside puts the bubble to the right of the element, centred on its line, or to the left
+  // where the page ends. It returns false when neither side has room.
+  function placeBeside(target, t) {
+    var a = textBox(target),
+      tr = t.getBoundingClientRect(),
+      vw = document.documentElement.clientWidth,
+      left = a.right + 8;
+    if (left + tr.width > vw - 8) {
+      left = a.left - tr.width - 8;
+    }
+    if (left < 8) {
+      return false;
+    }
+    var top = (a.top + a.bottom) / 2 - tr.height / 2;
+    top = Math.min(
+      Math.max(8, top),
+      Math.max(8, window.innerHeight - tr.height - 8),
+    );
+    t.style.left = Math.round(left) + "px";
+    t.style.top = Math.round(top) + "px";
+    return true;
+  }
+
   function place(target) {
     var t = node(),
       r = target.getBoundingClientRect(),
       vw = document.documentElement.clientWidth;
     var tr = t.getBoundingClientRect();
+    if (target.closest("td, th") && placeBeside(target, t)) {
+      return;
+    }
     var left = Math.min(Math.max(8, r.left), Math.max(8, vw - tr.width - 8));
     var top = r.bottom + 6;
     if (top + tr.height > window.innerHeight - 8 && r.top - tr.height - 6 > 8) {
@@ -88,11 +167,26 @@
     if (text.length > MAX) {
       text = text.slice(0, MAX - 1) + "\u2026";
     }
+    // a title that repeats the element's own text matters only while that text is cut off
+    // (a cell the table script found cut off carries data-autotitle: that was checked already)
+    if (
+      !target.hasAttribute("data-autotitle") &&
+      repeats(target, text) &&
+      !cutOff(target)
+    ) {
+      return;
+    }
     hide();
     owner = target;
     owner.setAttribute("aria-describedby", "tf-tooltip");
     var t = node();
     t.textContent = text;
+    // the full text of a cut-off value is read in one go: wider than an explanation, so that even
+    // the longest (160 characters) is three lines and stays inside its own row
+    t.classList.toggle(
+      "is-wide",
+      !!target.closest("td, th") && reveal(target, text),
+    );
     t.hidden = false;
     place(target);
   }

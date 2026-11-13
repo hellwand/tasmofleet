@@ -1,5 +1,6 @@
 import type { Page } from "@playwright/test";
 import { test, expect } from "../support/fixtures";
+import { hoverTip } from "../support/layout";
 import { designAdmin } from "../support/seed";
 import { startVisualStack, type VisualStack } from "../support/visual-stack";
 
@@ -480,3 +481,33 @@ for (const width of [1280, 1440]) {
     });
   });
 }
+
+// #811: the shared tooltip showed a bubble below the hovered cell, and a cell fills its whole row, so the
+// bubble lay over the next row's text. The rule holds for every table, so it is checked on the Devices
+// list too: with the pointer on any titled element of the first rows, in the scrolling cells and in
+// the pinned columns (status pills, relay switches, row actions), the bubble covers no other row's text.
+test(`Devices list: the bubble of a titled cell or pinned control covers no other row's text`, async ({ page }) => {
+  test.setTimeout(400_000); // about 30 hovers, each waits for its bubble
+  await page.setViewportSize({ width: 1280, height: 900 });
+  await page.setExtraHTTPHeaders(designAdmin);
+  await page.goto(stack.app.url + "/devices");
+  const rows = page.locator("table[data-table=devices] tbody tr");
+  await rows.first().waitFor();
+  await page.locator(".pwr").first().waitFor({ state: "attached", timeout: 20_000 });
+  await page.evaluate(() => document.fonts.ready);
+  const bad: string[] = [];
+  let hovered = 0;
+  for (const row of [1, 2]) {
+    const titled = rows.nth(row).locator("[title], [data-tip]");
+    for (let i = 0, n = await titled.count(); i < n; i++) {
+      const el = titled.nth(i);
+      if (!(await el.isVisible())) continue;
+      const what = await el.evaluate((e) => `${e.tagName.toLowerCase()}.${String(e.className).trim().split(" ")[0]} in ${(e.closest("td") as HTMLElement | null)?.dataset.label ?? "?"}`);
+      const m = await hoverTip(page, el, "table[data-table=devices] tbody tr");
+      hovered++;
+      if (m.covers.length) bad.push(`row ${row} ${what}: bubble "${m.tip?.text.slice(0, 40)}" ${Math.round(m.tip!.top)}-${Math.round(m.tip!.bottom)} covers ${m.covers.join(", ")}`);
+    }
+  }
+  expect(hovered, "the rows carry titled elements").toBeGreaterThan(6);
+  expect(bad).toEqual([]);
+});

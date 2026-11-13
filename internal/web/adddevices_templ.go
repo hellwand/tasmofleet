@@ -3436,7 +3436,7 @@ func scanLive(b scanBodyView) templ.Component {
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			if len(b.Rows) == 0 && b.More == 0 {
+			if len(b.Rows) == 0 {
 				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 301, "<div class=\"uempty add-empty\"><div class=\"uempty-icon\" aria-hidden=\"true\"><span></span></div>")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
@@ -3457,149 +3457,192 @@ func scanLive(b scanBodyView) templ.Component {
 					return templ_7745c5c3_Err
 				}
 			} else {
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 305, "<div class=\"add-table add-scan-table\"><table><colgroup><col class=\"c-sel\"> <col class=\"c-name\"> <col class=\"c-ip\"> <col class=\"c-mac\"> <col class=\"c-fw\"> <col class=\"c-st\"> <col class=\"c-act\"></colgroup> <thead><tr><th class=\"sel\">")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 305, "<div class=\"add-table add-scan-table\"><table><colgroup>")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
 				if b.Selectable {
-					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 306, "<input type=\"checkbox\" data-select-all hidden aria-label=\"Select all\">")
+					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 306, "<col class=\"c-sel\"> ")
 					if templ_7745c5c3_Err != nil {
 						return templ_7745c5c3_Err
 					}
 				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 307, "</th><th>Name</th><th>IP</th><th>MAC</th><th>Firmware</th><th>Status</th><th class=\"act\"><span class=\"sr-only\">Actions</span></th></tr></thead> <tbody>")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 307, "<col class=\"c-name\"> <col class=\"c-ip\"> <col class=\"c-mac\"> <col class=\"c-fw\"> <col class=\"c-st\"> <col class=\"c-act\"></colgroup> <thead><tr>")
+				if templ_7745c5c3_Err != nil {
+					return templ_7745c5c3_Err
+				}
+				if b.Selectable {
+					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 308, "<th class=\"sel\"><input type=\"checkbox\" data-select-all hidden aria-label=\"Select all\"></th>")
+					if templ_7745c5c3_Err != nil {
+						return templ_7745c5c3_Err
+					}
+				}
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 309, "<th>Name</th><th>IP</th><th>MAC</th><th>Firmware</th><th>Status</th><th class=\"act\"><span class=\"sr-only\">Actions</span></th></tr></thead> <tbody>")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
 				for _, r := range b.Rows {
-					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 308, "<tr><td class=\"sel\">")
+					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 310, "<tr>")
 					if templ_7745c5c3_Err != nil {
 						return templ_7745c5c3_Err
 					}
-					if r.Kind == "new" {
-						templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 309, "<input type=\"checkbox\" name=\"id\" value=\"")
+					if b.Selectable {
+						templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 311, "<td class=\"sel\">")
 						if templ_7745c5c3_Err != nil {
 							return templ_7745c5c3_Err
 						}
-						var templ_7745c5c3_Var174 string
-						templ_7745c5c3_Var174, templ_7745c5c3_Err = templruntime.NewAttributeExpression(strconv.FormatInt(r.ProposalID, 10) + ":" + r.Version).Resolve(ctx)
-						if templ_7745c5c3_Err != nil {
-							return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/adddevices.templ`, Line: 675, Col: 105}
+						if r.Kind == "new" {
+							templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 312, "<input type=\"checkbox\" name=\"id\" value=\"")
+							if templ_7745c5c3_Err != nil {
+								return templ_7745c5c3_Err
+							}
+							var templ_7745c5c3_Var174 string
+							templ_7745c5c3_Var174, templ_7745c5c3_Err = templruntime.NewAttributeExpression(strconv.FormatInt(r.ProposalID, 10) + ":" + r.Version).Resolve(ctx)
+							if templ_7745c5c3_Err != nil {
+								return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/adddevices.templ`, Line: 676, Col: 106}
+							}
+							_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var174)
+							if templ_7745c5c3_Err != nil {
+								return templ_7745c5c3_Err
+							}
+							templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 313, "\" aria-label=\"")
+							if templ_7745c5c3_Err != nil {
+								return templ_7745c5c3_Err
+							}
+							var templ_7745c5c3_Var175 string
+							templ_7745c5c3_Var175, templ_7745c5c3_Err = templruntime.NewAttributeExpression("Select " + r.Name).Resolve(ctx)
+							if templ_7745c5c3_Err != nil {
+								return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/adddevices.templ`, Line: 676, Col: 140}
+							}
+							_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var175)
+							if templ_7745c5c3_Err != nil {
+								return templ_7745c5c3_Err
+							}
+							templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 314, "\">")
+							if templ_7745c5c3_Err != nil {
+								return templ_7745c5c3_Err
+							}
 						}
-						_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var174)
-						if templ_7745c5c3_Err != nil {
-							return templ_7745c5c3_Err
-						}
-						templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 310, "\" aria-label=\"")
-						if templ_7745c5c3_Err != nil {
-							return templ_7745c5c3_Err
-						}
-						var templ_7745c5c3_Var175 string
-						templ_7745c5c3_Var175, templ_7745c5c3_Err = templruntime.NewAttributeExpression("Select " + r.Name).Resolve(ctx)
-						if templ_7745c5c3_Err != nil {
-							return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/adddevices.templ`, Line: 675, Col: 139}
-						}
-						_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var175)
-						if templ_7745c5c3_Err != nil {
-							return templ_7745c5c3_Err
-						}
-						templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 311, "\">")
+						templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 315, "</td>")
 						if templ_7745c5c3_Err != nil {
 							return templ_7745c5c3_Err
 						}
 					}
-					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 312, "</td><td class=\"name\" title=\"")
+					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 316, "<td class=\"name\" title=\"")
 					if templ_7745c5c3_Err != nil {
 						return templ_7745c5c3_Err
 					}
 					var templ_7745c5c3_Var176 string
 					templ_7745c5c3_Var176, templ_7745c5c3_Err = templruntime.NewAttributeExpression(r.Name).Resolve(ctx)
 					if templ_7745c5c3_Err != nil {
-						return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/adddevices.templ`, Line: 678, Col: 40}
+						return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/adddevices.templ`, Line: 680, Col: 40}
 					}
 					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var176)
 					if templ_7745c5c3_Err != nil {
 						return templ_7745c5c3_Err
 					}
-					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 313, "\"><span class=\"add-label\">")
+					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 317, "\"><span class=\"add-label\">")
 					if templ_7745c5c3_Err != nil {
 						return templ_7745c5c3_Err
 					}
 					var templ_7745c5c3_Var177 string
 					templ_7745c5c3_Var177, templ_7745c5c3_Err = templ.JoinStringErrs(r.Name)
 					if templ_7745c5c3_Err != nil {
-						return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/adddevices.templ`, Line: 678, Col: 75}
+						return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/adddevices.templ`, Line: 680, Col: 75}
 					}
 					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var177))
 					if templ_7745c5c3_Err != nil {
 						return templ_7745c5c3_Err
 					}
-					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 314, "</span></td><td class=\"mono\" title=\"")
+					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 318, "</span></td><td class=\"mono\" title=\"")
 					if templ_7745c5c3_Err != nil {
 						return templ_7745c5c3_Err
 					}
 					var templ_7745c5c3_Var178 string
 					templ_7745c5c3_Var178, templ_7745c5c3_Err = templruntime.NewAttributeExpression(r.Address).Resolve(ctx)
 					if templ_7745c5c3_Err != nil {
-						return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/adddevices.templ`, Line: 679, Col: 43}
+						return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/adddevices.templ`, Line: 681, Col: 43}
 					}
 					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var178)
 					if templ_7745c5c3_Err != nil {
 						return templ_7745c5c3_Err
 					}
-					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 315, "\" data-visual-mask>")
+					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 319, "\" data-visual-mask>")
 					if templ_7745c5c3_Err != nil {
 						return templ_7745c5c3_Err
 					}
 					var templ_7745c5c3_Var179 string
 					templ_7745c5c3_Var179, templ_7745c5c3_Err = templ.JoinStringErrs(r.Address)
 					if templ_7745c5c3_Err != nil {
-						return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/adddevices.templ`, Line: 679, Col: 74}
+						return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/adddevices.templ`, Line: 681, Col: 74}
 					}
 					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var179))
 					if templ_7745c5c3_Err != nil {
 						return templ_7745c5c3_Err
 					}
-					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 316, "</td><td class=\"mono add-t2\" title=\"")
+					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 320, "</td><td class=\"mono add-t2\" title=\"")
 					if templ_7745c5c3_Err != nil {
 						return templ_7745c5c3_Err
 					}
 					var templ_7745c5c3_Var180 string
 					templ_7745c5c3_Var180, templ_7745c5c3_Err = templruntime.NewAttributeExpression(r.MAC).Resolve(ctx)
 					if templ_7745c5c3_Err != nil {
-						return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/adddevices.templ`, Line: 680, Col: 46}
+						return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/adddevices.templ`, Line: 682, Col: 46}
 					}
 					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var180)
 					if templ_7745c5c3_Err != nil {
 						return templ_7745c5c3_Err
 					}
-					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 317, "\" data-visual-mask>")
+					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 321, "\" data-visual-mask>")
 					if templ_7745c5c3_Err != nil {
 						return templ_7745c5c3_Err
 					}
 					var templ_7745c5c3_Var181 string
 					templ_7745c5c3_Var181, templ_7745c5c3_Err = templ.JoinStringErrs(r.MAC)
 					if templ_7745c5c3_Err != nil {
-						return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/adddevices.templ`, Line: 680, Col: 73}
+						return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/adddevices.templ`, Line: 682, Col: 73}
 					}
 					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var181))
 					if templ_7745c5c3_Err != nil {
 						return templ_7745c5c3_Err
 					}
-					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 318, "</td><td class=\"mono\">")
+					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 322, "</td><td class=\"mono\"")
 					if templ_7745c5c3_Err != nil {
 						return templ_7745c5c3_Err
 					}
-					var templ_7745c5c3_Var182 string
-					templ_7745c5c3_Var182, templ_7745c5c3_Err = templ.JoinStringErrs(dash(r.Firmware))
-					if templ_7745c5c3_Err != nil {
-						return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/adddevices.templ`, Line: 681, Col: 44}
+					if r.FirmwareTip != "" {
+						templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 323, " title=\"")
+						if templ_7745c5c3_Err != nil {
+							return templ_7745c5c3_Err
+						}
+						var templ_7745c5c3_Var182 string
+						templ_7745c5c3_Var182, templ_7745c5c3_Err = templruntime.NewAttributeExpression(r.FirmwareTip).Resolve(ctx)
+						if templ_7745c5c3_Err != nil {
+							return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/adddevices.templ`, Line: 686, Col: 32}
+						}
+						_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var182)
+						if templ_7745c5c3_Err != nil {
+							return templ_7745c5c3_Err
+						}
+						templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 324, "\"")
+						if templ_7745c5c3_Err != nil {
+							return templ_7745c5c3_Err
+						}
 					}
-					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var182))
+					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 325, ">")
 					if templ_7745c5c3_Err != nil {
 						return templ_7745c5c3_Err
 					}
-					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 319, "</td><td>")
+					var templ_7745c5c3_Var183 string
+					templ_7745c5c3_Var183, templ_7745c5c3_Err = templ.JoinStringErrs(dash(r.Firmware))
+					if templ_7745c5c3_Err != nil {
+						return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/adddevices.templ`, Line: 688, Col: 28}
+					}
+					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var183))
+					if templ_7745c5c3_Err != nil {
+						return templ_7745c5c3_Err
+					}
+					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 326, "</td><td>")
 					if templ_7745c5c3_Err != nil {
 						return templ_7745c5c3_Err
 					}
@@ -3607,7 +3650,7 @@ func scanLive(b scanBodyView) templ.Component {
 					if templ_7745c5c3_Err != nil {
 						return templ_7745c5c3_Err
 					}
-					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 320, "</td><td class=\"act\">")
+					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 327, "</td><td class=\"act\">")
 					if templ_7745c5c3_Err != nil {
 						return templ_7745c5c3_Err
 					}
@@ -3615,66 +3658,30 @@ func scanLive(b scanBodyView) templ.Component {
 					if templ_7745c5c3_Err != nil {
 						return templ_7745c5c3_Err
 					}
-					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 321, "</td></tr>")
+					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 328, "</td></tr>")
 					if templ_7745c5c3_Err != nil {
 						return templ_7745c5c3_Err
 					}
 				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 322, "</tbody></table>")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 329, "</tbody></table></div><div class=\"add-cards\">")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				if b.More > 0 {
-					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 323, "<a class=\"add-more-known\" href=\"")
-					if templ_7745c5c3_Err != nil {
-						return templ_7745c5c3_Err
-					}
-					var templ_7745c5c3_Var183 string
-					templ_7745c5c3_Var183, templ_7745c5c3_Err = templruntime.NewAttributeExpression(templ.SafeURL(b.MoreHref)).ResolveURL(ctx)
-					if templ_7745c5c3_Err != nil {
-						return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/adddevices.templ`, Line: 693, Col: 64}
-					}
-					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var183)
-					if templ_7745c5c3_Err != nil {
-						return templ_7745c5c3_Err
-					}
-					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 324, "\">and ")
+				for _, r := range b.Rows {
+					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 330, "<div class=\"add-card add-scan-card\"><div class=\"add-card-body\"><span class=\"add-card-title\"><span class=\"add-card-name\">")
 					if templ_7745c5c3_Err != nil {
 						return templ_7745c5c3_Err
 					}
 					var templ_7745c5c3_Var184 string
-					templ_7745c5c3_Var184, templ_7745c5c3_Err = templ.JoinStringErrs(strconv.Itoa(b.More))
+					templ_7745c5c3_Var184, templ_7745c5c3_Err = templ.JoinStringErrs(r.Name)
 					if templ_7745c5c3_Err != nil {
-						return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/adddevices.templ`, Line: 693, Col: 93}
+						return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/adddevices.templ`, Line: 705, Col: 45}
 					}
 					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var184))
 					if templ_7745c5c3_Err != nil {
 						return templ_7745c5c3_Err
 					}
-					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 325, " more known devices</a>")
-					if templ_7745c5c3_Err != nil {
-						return templ_7745c5c3_Err
-					}
-				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 326, "</div><div class=\"add-cards\">")
-				if templ_7745c5c3_Err != nil {
-					return templ_7745c5c3_Err
-				}
-				for _, r := range b.Rows {
-					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 327, "<div class=\"add-card add-scan-card\"><div class=\"add-card-body\"><span class=\"add-card-title\"><span class=\"add-card-name\">")
-					if templ_7745c5c3_Err != nil {
-						return templ_7745c5c3_Err
-					}
-					var templ_7745c5c3_Var185 string
-					templ_7745c5c3_Var185, templ_7745c5c3_Err = templ.JoinStringErrs(r.Name)
-					if templ_7745c5c3_Err != nil {
-						return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/adddevices.templ`, Line: 701, Col: 45}
-					}
-					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var185))
-					if templ_7745c5c3_Err != nil {
-						return templ_7745c5c3_Err
-					}
-					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 328, "</span>")
+					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 331, "</span>")
 					if templ_7745c5c3_Err != nil {
 						return templ_7745c5c3_Err
 					}
@@ -3682,46 +3689,46 @@ func scanLive(b scanBodyView) templ.Component {
 					if templ_7745c5c3_Err != nil {
 						return templ_7745c5c3_Err
 					}
-					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 329, "</span> <span class=\"add-card-meta\"><span data-visual-mask>")
+					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 332, "</span> <span class=\"add-card-meta\"><span data-visual-mask>")
+					if templ_7745c5c3_Err != nil {
+						return templ_7745c5c3_Err
+					}
+					var templ_7745c5c3_Var185 string
+					templ_7745c5c3_Var185, templ_7745c5c3_Err = templ.JoinStringErrs(r.Address)
+					if templ_7745c5c3_Err != nil {
+						return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/adddevices.templ`, Line: 708, Col: 70}
+					}
+					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var185))
+					if templ_7745c5c3_Err != nil {
+						return templ_7745c5c3_Err
+					}
+					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 333, "</span>")
 					if templ_7745c5c3_Err != nil {
 						return templ_7745c5c3_Err
 					}
 					var templ_7745c5c3_Var186 string
-					templ_7745c5c3_Var186, templ_7745c5c3_Err = templ.JoinStringErrs(r.Address)
+					templ_7745c5c3_Var186, templ_7745c5c3_Err = templ.JoinStringErrs(metaTail(r.Firmware))
 					if templ_7745c5c3_Err != nil {
-						return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/adddevices.templ`, Line: 704, Col: 70}
+						return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/adddevices.templ`, Line: 708, Col: 101}
 					}
 					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var186))
 					if templ_7745c5c3_Err != nil {
 						return templ_7745c5c3_Err
 					}
-					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 330, "</span>")
+					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 334, "</span> <span class=\"add-card-src mono\" data-visual-mask>")
 					if templ_7745c5c3_Err != nil {
 						return templ_7745c5c3_Err
 					}
 					var templ_7745c5c3_Var187 string
-					templ_7745c5c3_Var187, templ_7745c5c3_Err = templ.JoinStringErrs(metaTail(r.Firmware))
+					templ_7745c5c3_Var187, templ_7745c5c3_Err = templ.JoinStringErrs(r.MAC)
 					if templ_7745c5c3_Err != nil {
-						return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/adddevices.templ`, Line: 704, Col: 101}
+						return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/adddevices.templ`, Line: 709, Col: 64}
 					}
 					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var187))
 					if templ_7745c5c3_Err != nil {
 						return templ_7745c5c3_Err
 					}
-					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 331, "</span> <span class=\"add-card-src mono\" data-visual-mask>")
-					if templ_7745c5c3_Err != nil {
-						return templ_7745c5c3_Err
-					}
-					var templ_7745c5c3_Var188 string
-					templ_7745c5c3_Var188, templ_7745c5c3_Err = templ.JoinStringErrs(r.MAC)
-					if templ_7745c5c3_Err != nil {
-						return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/adddevices.templ`, Line: 705, Col: 64}
-					}
-					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var188))
-					if templ_7745c5c3_Err != nil {
-						return templ_7745c5c3_Err
-					}
-					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 332, "</span><div class=\"add-card-acts\">")
+					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 335, "</span><div class=\"add-card-acts\">")
 					if templ_7745c5c3_Err != nil {
 						return templ_7745c5c3_Err
 					}
@@ -3729,39 +3736,7 @@ func scanLive(b scanBodyView) templ.Component {
 					if templ_7745c5c3_Err != nil {
 						return templ_7745c5c3_Err
 					}
-					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 333, "</div></div></div>")
-					if templ_7745c5c3_Err != nil {
-						return templ_7745c5c3_Err
-					}
-				}
-				if b.More > 0 {
-					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 334, "<a class=\"add-more-known\" href=\"")
-					if templ_7745c5c3_Err != nil {
-						return templ_7745c5c3_Err
-					}
-					var templ_7745c5c3_Var189 string
-					templ_7745c5c3_Var189, templ_7745c5c3_Err = templruntime.NewAttributeExpression(templ.SafeURL(b.MoreHref)).ResolveURL(ctx)
-					if templ_7745c5c3_Err != nil {
-						return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/adddevices.templ`, Line: 713, Col: 64}
-					}
-					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var189)
-					if templ_7745c5c3_Err != nil {
-						return templ_7745c5c3_Err
-					}
-					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 335, "\">and ")
-					if templ_7745c5c3_Err != nil {
-						return templ_7745c5c3_Err
-					}
-					var templ_7745c5c3_Var190 string
-					templ_7745c5c3_Var190, templ_7745c5c3_Err = templ.JoinStringErrs(strconv.Itoa(b.More))
-					if templ_7745c5c3_Err != nil {
-						return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/adddevices.templ`, Line: 713, Col: 93}
-					}
-					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var190))
-					if templ_7745c5c3_Err != nil {
-						return templ_7745c5c3_Err
-					}
-					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 336, " more known devices</a>")
+					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 336, "</div></div></div>")
 					if templ_7745c5c3_Err != nil {
 						return templ_7745c5c3_Err
 					}
@@ -3803,12 +3778,12 @@ func scanRowActs(b scanBodyView, r scanRow) templ.Component {
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			var templ_7745c5c3_Var192 string
-			templ_7745c5c3_Var192, templ_7745c5c3_Err = templruntime.NewAttributeExpression(templ.SafeURL(b.Base + "/discovery/proposals/" + strconv.FormatInt(r.ProposalID, 10) + "/dismiss")).ResolveURL(ctx)
+			var templ_7745c5c3_Var189 string
+			templ_7745c5c3_Var189, templ_7745c5c3_Err = templruntime.NewAttributeExpression(templ.SafeURL(b.Base + "/discovery/proposals/" + strconv.FormatInt(r.ProposalID, 10) + "/dismiss")).ResolveURL(ctx)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/adddevices.templ`, Line: 724, Col: 166}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/adddevices.templ`, Line: 725, Col: 166}
 			}
-			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var192)
+			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var189)
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -3816,12 +3791,12 @@ func scanRowActs(b scanBodyView, r scanRow) templ.Component {
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			var templ_7745c5c3_Var193 string
-			templ_7745c5c3_Var193, templ_7745c5c3_Err = templruntime.NewAttributeExpression(r.Version).Resolve(ctx)
+			var templ_7745c5c3_Var190 string
+			templ_7745c5c3_Var190, templ_7745c5c3_Err = templruntime.NewAttributeExpression(r.Version).Resolve(ctx)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/adddevices.templ`, Line: 724, Col: 201}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/adddevices.templ`, Line: 725, Col: 201}
 			}
-			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var193)
+			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var190)
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -3829,12 +3804,12 @@ func scanRowActs(b scanBodyView, r scanRow) templ.Component {
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			var templ_7745c5c3_Var194 string
-			templ_7745c5c3_Var194, templ_7745c5c3_Err = templruntime.NewAttributeExpression(templ.SafeURL(r.AddHref)).ResolveURL(ctx)
+			var templ_7745c5c3_Var191 string
+			templ_7745c5c3_Var191, templ_7745c5c3_Err = templruntime.NewAttributeExpression(templ.SafeURL(r.AddHref)).ResolveURL(ctx)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/adddevices.templ`, Line: 725, Col: 56}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/adddevices.templ`, Line: 726, Col: 56}
 			}
-			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var194)
+			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var191)
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -3847,12 +3822,12 @@ func scanRowActs(b scanBodyView, r scanRow) templ.Component {
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			var templ_7745c5c3_Var195 string
-			templ_7745c5c3_Var195, templ_7745c5c3_Err = templruntime.NewAttributeExpression(templ.SafeURL(b.Base + "/discovery/proposals/" + strconv.FormatInt(r.ProposalID, 10) + "/undismiss")).ResolveURL(ctx)
+			var templ_7745c5c3_Var192 string
+			templ_7745c5c3_Var192, templ_7745c5c3_Err = templruntime.NewAttributeExpression(templ.SafeURL(b.Base + "/discovery/proposals/" + strconv.FormatInt(r.ProposalID, 10) + "/undismiss")).ResolveURL(ctx)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/adddevices.templ`, Line: 727, Col: 159}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/adddevices.templ`, Line: 728, Col: 159}
 			}
-			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var195)
+			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var192)
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -3860,12 +3835,12 @@ func scanRowActs(b scanBodyView, r scanRow) templ.Component {
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			var templ_7745c5c3_Var196 string
-			templ_7745c5c3_Var196, templ_7745c5c3_Err = templruntime.NewAttributeExpression(r.Version).Resolve(ctx)
+			var templ_7745c5c3_Var193 string
+			templ_7745c5c3_Var193, templ_7745c5c3_Err = templruntime.NewAttributeExpression(r.Version).Resolve(ctx)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/adddevices.templ`, Line: 727, Col: 194}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/adddevices.templ`, Line: 728, Col: 194}
 			}
-			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var196)
+			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var193)
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -3878,12 +3853,12 @@ func scanRowActs(b scanBodyView, r scanRow) templ.Component {
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			var templ_7745c5c3_Var197 string
-			templ_7745c5c3_Var197, templ_7745c5c3_Err = templruntime.NewAttributeExpression(templ.SafeURL(r.OpenHref)).ResolveURL(ctx)
+			var templ_7745c5c3_Var194 string
+			templ_7745c5c3_Var194, templ_7745c5c3_Err = templruntime.NewAttributeExpression(templ.SafeURL(r.OpenHref)).ResolveURL(ctx)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/adddevices.templ`, Line: 729, Col: 59}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/adddevices.templ`, Line: 730, Col: 59}
 			}
-			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var197)
+			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var194)
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -3896,12 +3871,12 @@ func scanRowActs(b scanBodyView, r scanRow) templ.Component {
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			var templ_7745c5c3_Var198 string
-			templ_7745c5c3_Var198, templ_7745c5c3_Err = templruntime.NewAttributeExpression(templ.SafeURL(r.ReviewRef)).ResolveURL(ctx)
+			var templ_7745c5c3_Var195 string
+			templ_7745c5c3_Var195, templ_7745c5c3_Err = templruntime.NewAttributeExpression(templ.SafeURL(r.ReviewRef)).ResolveURL(ctx)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/adddevices.templ`, Line: 731, Col: 60}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/adddevices.templ`, Line: 732, Col: 60}
 			}
-			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var198)
+			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var195)
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -3914,12 +3889,12 @@ func scanRowActs(b scanBodyView, r scanRow) templ.Component {
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			var templ_7745c5c3_Var199 string
-			templ_7745c5c3_Var199, templ_7745c5c3_Err = templruntime.NewAttributeExpression(templ.SafeURL(r.AddHref)).ResolveURL(ctx)
+			var templ_7745c5c3_Var196 string
+			templ_7745c5c3_Var196, templ_7745c5c3_Err = templruntime.NewAttributeExpression(templ.SafeURL(r.AddHref)).ResolveURL(ctx)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/adddevices.templ`, Line: 733, Col: 56}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/adddevices.templ`, Line: 734, Col: 56}
 			}
-			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var199)
+			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var196)
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -3962,12 +3937,12 @@ func importBodyPart(b importBody) templ.Component {
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			var templ_7745c5c3_Var201 string
-			templ_7745c5c3_Var201, templ_7745c5c3_Err = templruntime.NewAttributeExpression(b.Base + "/import/tasmoadmin").Resolve(ctx)
+			var templ_7745c5c3_Var198 string
+			templ_7745c5c3_Var198, templ_7745c5c3_Err = templruntime.NewAttributeExpression(b.Base + "/import/tasmoadmin").Resolve(ctx)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/adddevices.templ`, Line: 746, Col: 43}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/adddevices.templ`, Line: 747, Col: 43}
 			}
-			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var201)
+			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var198)
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -3978,12 +3953,12 @@ func importBodyPart(b importBody) templ.Component {
 			if len(b.Uploaded) > 0 {
 				for i, n := range b.Uploaded {
 					if i > 0 {
-						var templ_7745c5c3_Var202 string
-						templ_7745c5c3_Var202, templ_7745c5c3_Err = templ.JoinStringErrs(listSep(i, len(b.Uploaded)))
+						var templ_7745c5c3_Var199 string
+						templ_7745c5c3_Var199, templ_7745c5c3_Err = templ.JoinStringErrs(listSep(i, len(b.Uploaded)))
 						if templ_7745c5c3_Err != nil {
-							return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/adddevices.templ`, Line: 758, Col: 37}
+							return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/adddevices.templ`, Line: 759, Col: 37}
 						}
-						_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var202))
+						_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var199))
 						if templ_7745c5c3_Err != nil {
 							return templ_7745c5c3_Err
 						}
@@ -3992,12 +3967,12 @@ func importBodyPart(b importBody) templ.Component {
 					if templ_7745c5c3_Err != nil {
 						return templ_7745c5c3_Err
 					}
-					var templ_7745c5c3_Var203 string
-					templ_7745c5c3_Var203, templ_7745c5c3_Err = templ.JoinStringErrs(n)
+					var templ_7745c5c3_Var200 string
+					templ_7745c5c3_Var200, templ_7745c5c3_Err = templ.JoinStringErrs(n)
 					if templ_7745c5c3_Err != nil {
-						return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/adddevices.templ`, Line: 760, Col: 13}
+						return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/adddevices.templ`, Line: 761, Col: 13}
 					}
-					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var203))
+					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var200))
 					if templ_7745c5c3_Err != nil {
 						return templ_7745c5c3_Err
 					}
@@ -4010,12 +3985,12 @@ func importBodyPart(b importBody) templ.Component {
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				var templ_7745c5c3_Var204 string
-				templ_7745c5c3_Var204, templ_7745c5c3_Err = templ.JoinStringErrs("uploaded from TasmoAdmin")
+				var templ_7745c5c3_Var201 string
+				templ_7745c5c3_Var201, templ_7745c5c3_Err = templ.JoinStringErrs("uploaded from TasmoAdmin")
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/adddevices.templ`, Line: 762, Col: 34}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/adddevices.templ`, Line: 763, Col: 34}
 				}
-				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var204))
+				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var201))
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
@@ -4028,12 +4003,12 @@ func importBodyPart(b importBody) templ.Component {
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				var templ_7745c5c3_Var205 string
-				templ_7745c5c3_Var205, templ_7745c5c3_Err = templ.JoinStringErrs(" from TasmoAdmin, with ")
+				var templ_7745c5c3_Var202 string
+				templ_7745c5c3_Var202, templ_7745c5c3_Err = templ.JoinStringErrs(" from TasmoAdmin, with ")
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/adddevices.templ`, Line: 765, Col: 51}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/adddevices.templ`, Line: 766, Col: 51}
 				}
-				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var205))
+				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var202))
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
@@ -4041,12 +4016,12 @@ func importBodyPart(b importBody) templ.Component {
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				var templ_7745c5c3_Var206 string
-				templ_7745c5c3_Var206, templ_7745c5c3_Err = templ.JoinStringErrs(" and ")
+				var templ_7745c5c3_Var203 string
+				templ_7745c5c3_Var203, templ_7745c5c3_Err = templ.JoinStringErrs(" and ")
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/adddevices.templ`, Line: 765, Col: 82}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/adddevices.templ`, Line: 766, Col: 82}
 				}
-				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var206))
+				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var203))
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
@@ -4054,12 +4029,12 @@ func importBodyPart(b importBody) templ.Component {
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				var templ_7745c5c3_Var207 string
-				templ_7745c5c3_Var207, templ_7745c5c3_Err = templ.JoinStringErrs(" if you have them")
+				var templ_7745c5c3_Var204 string
+				templ_7745c5c3_Var204, templ_7745c5c3_Err = templ.JoinStringErrs(" if you have them")
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/adddevices.templ`, Line: 765, Col: 132}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/adddevices.templ`, Line: 766, Col: 132}
 				}
-				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var207))
+				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var204))
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
@@ -4127,12 +4102,12 @@ func importBodyPart(b importBody) templ.Component {
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				var templ_7745c5c3_Var208 string
-				templ_7745c5c3_Var208, templ_7745c5c3_Err = templruntime.NewAttributeExpression(b.Base + "/import/tasmoadmin/apply").Resolve(ctx)
+				var templ_7745c5c3_Var205 string
+				templ_7745c5c3_Var205, templ_7745c5c3_Err = templruntime.NewAttributeExpression(b.Base + "/import/tasmoadmin/apply").Resolve(ctx)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/adddevices.templ`, Line: 798, Col: 78}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/adddevices.templ`, Line: 799, Col: 78}
 				}
-				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var208)
+				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var205)
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
@@ -4140,12 +4115,12 @@ func importBodyPart(b importBody) templ.Component {
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				var templ_7745c5c3_Var209 string
-				templ_7745c5c3_Var209, templ_7745c5c3_Err = templruntime.NewAttributeExpression(b.CSRF).Resolve(ctx)
+				var templ_7745c5c3_Var206 string
+				templ_7745c5c3_Var206, templ_7745c5c3_Err = templruntime.NewAttributeExpression(b.CSRF).Resolve(ctx)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/adddevices.templ`, Line: 799, Col: 53}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/adddevices.templ`, Line: 800, Col: 53}
 				}
-				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var209)
+				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var206)
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
@@ -4153,12 +4128,12 @@ func importBodyPart(b importBody) templ.Component {
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				var templ_7745c5c3_Var210 string
-				templ_7745c5c3_Var210, templ_7745c5c3_Err = templruntime.NewAttributeExpression(b.Plan.Token).Resolve(ctx)
+				var templ_7745c5c3_Var207 string
+				templ_7745c5c3_Var207, templ_7745c5c3_Err = templruntime.NewAttributeExpression(b.Plan.Token).Resolve(ctx)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/adddevices.templ`, Line: 800, Col: 59}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/adddevices.templ`, Line: 801, Col: 59}
 				}
-				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var210)
+				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var207)
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
@@ -4176,12 +4151,12 @@ func importBodyPart(b importBody) templ.Component {
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				var templ_7745c5c3_Var211 string
-				templ_7745c5c3_Var211, templ_7745c5c3_Err = templ.JoinStringErrs(plural(b.Plan.Create+b.Plan.Merge, "device"))
+				var templ_7745c5c3_Var208 string
+				templ_7745c5c3_Var208, templ_7745c5c3_Err = templ.JoinStringErrs(plural(b.Plan.Create+b.Plan.Merge, "device"))
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/adddevices.templ`, Line: 807, Col: 112}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/adddevices.templ`, Line: 808, Col: 112}
 				}
-				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var211))
+				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var208))
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
@@ -4205,12 +4180,12 @@ func importBodyPart(b importBody) templ.Component {
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			var templ_7745c5c3_Var212 string
-			templ_7745c5c3_Var212, templ_7745c5c3_Err = templ.JoinStringErrs(b.Report.Summary)
+			var templ_7745c5c3_Var209 string
+			templ_7745c5c3_Var209, templ_7745c5c3_Err = templ.JoinStringErrs(b.Report.Summary)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/adddevices.templ`, Line: 819, Col: 74}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/adddevices.templ`, Line: 820, Col: 74}
 			}
-			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var212))
+			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var209))
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -4238,12 +4213,12 @@ func importBodyPart(b importBody) templ.Component {
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			var templ_7745c5c3_Var213 string
-			templ_7745c5c3_Var213, templ_7745c5c3_Err = templruntime.NewAttributeExpression(templ.SafeURL(b.Base + "/import/tasmoadmin/report.csv")).ResolveURL(ctx)
+			var templ_7745c5c3_Var210 string
+			templ_7745c5c3_Var210, templ_7745c5c3_Err = templruntime.NewAttributeExpression(templ.SafeURL(b.Base + "/import/tasmoadmin/report.csv")).ResolveURL(ctx)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/adddevices.templ`, Line: 830, Col: 81}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/adddevices.templ`, Line: 831, Col: 81}
 			}
-			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var213)
+			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var210)
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -4251,12 +4226,12 @@ func importBodyPart(b importBody) templ.Component {
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			var templ_7745c5c3_Var214 string
-			templ_7745c5c3_Var214, templ_7745c5c3_Err = templruntime.NewAttributeExpression(templ.SafeURL(b.Base + "/devices/new#card-import")).ResolveURL(ctx)
+			var templ_7745c5c3_Var211 string
+			templ_7745c5c3_Var211, templ_7745c5c3_Err = templruntime.NewAttributeExpression(templ.SafeURL(b.Base + "/devices/new#card-import")).ResolveURL(ctx)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/adddevices.templ`, Line: 831, Col: 76}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/adddevices.templ`, Line: 832, Col: 76}
 			}
-			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var214)
+			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var211)
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -4264,12 +4239,12 @@ func importBodyPart(b importBody) templ.Component {
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			var templ_7745c5c3_Var215 string
-			templ_7745c5c3_Var215, templ_7745c5c3_Err = templruntime.NewAttributeExpression(templ.SafeURL(b.Base + "/devices")).ResolveURL(ctx)
+			var templ_7745c5c3_Var212 string
+			templ_7745c5c3_Var212, templ_7745c5c3_Err = templruntime.NewAttributeExpression(templ.SafeURL(b.Base + "/devices")).ResolveURL(ctx)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/adddevices.templ`, Line: 832, Col: 72}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/adddevices.templ`, Line: 833, Col: 72}
 			}
-			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var215)
+			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var212)
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -4315,17 +4290,17 @@ func importRowView(r importRow, badgeClass string) templ.Component {
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			var templ_7745c5c3_Var217 = []any{badgeClass}
-			templ_7745c5c3_Err = templ.RenderCSSItems(ctx, templ_7745c5c3_ElementWriter, templ_7745c5c3_Var217...)
+			var templ_7745c5c3_Var214 = []any{badgeClass}
+			templ_7745c5c3_Err = templ.RenderCSSItems(ctx, templ_7745c5c3_ElementWriter, templ_7745c5c3_Var214...)
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			var templ_7745c5c3_Var218 string
-			templ_7745c5c3_Var218, templ_7745c5c3_Err = templruntime.NewAttributeExpression(templ.CSSClasses(templ_7745c5c3_Var217).String()).Resolve(ctx)
+			var templ_7745c5c3_Var215 string
+			templ_7745c5c3_Var215, templ_7745c5c3_Err = templruntime.NewAttributeExpression(templ.CSSClasses(templ_7745c5c3_Var214).String()).Resolve(ctx)
 			if templ_7745c5c3_Err != nil {
 				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/adddevices.templ`, Line: 1, Col: 0}
 			}
-			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var218)
+			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var215)
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -4355,12 +4330,12 @@ func importRowView(r importRow, badgeClass string) templ.Component {
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		var templ_7745c5c3_Var219 string
-		templ_7745c5c3_Var219, templ_7745c5c3_Err = templ.JoinStringErrs(r.Name)
+		var templ_7745c5c3_Var216 string
+		templ_7745c5c3_Var216, templ_7745c5c3_Err = templ.JoinStringErrs(r.Name)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/adddevices.templ`, Line: 844, Col: 41}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/adddevices.templ`, Line: 845, Col: 41}
 		}
-		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var219))
+		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var216))
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -4373,12 +4348,12 @@ func importRowView(r importRow, badgeClass string) templ.Component {
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			var templ_7745c5c3_Var220 string
-			templ_7745c5c3_Var220, templ_7745c5c3_Err = templ.JoinStringErrs(r.Address)
+			var templ_7745c5c3_Var217 string
+			templ_7745c5c3_Var217, templ_7745c5c3_Err = templ.JoinStringErrs(r.Address)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/adddevices.templ`, Line: 846, Col: 65}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/adddevices.templ`, Line: 847, Col: 65}
 			}
-			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var220))
+			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var217))
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -4391,12 +4366,12 @@ func importRowView(r importRow, badgeClass string) templ.Component {
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		var templ_7745c5c3_Var221 string
-		templ_7745c5c3_Var221, templ_7745c5c3_Err = templ.JoinStringErrs(r.Why)
+		var templ_7745c5c3_Var218 string
+		templ_7745c5c3_Var218, templ_7745c5c3_Err = templ.JoinStringErrs(r.Why)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/adddevices.templ`, Line: 849, Col: 38}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/adddevices.templ`, Line: 850, Col: 38}
 		}
-		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var221))
+		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var218))
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}

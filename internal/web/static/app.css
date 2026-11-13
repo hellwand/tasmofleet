@@ -1545,6 +1545,9 @@ details.rowmenu > .rowmenu-body {
   white-space: pre-line;
   pointer-events: none;
 }
+.tooltip.is-wide {
+  max-width: 60ch;
+}
 .tooltip.is-static {
   /* NEW, previews only: a tooltip in the flow */
   position: relative;
@@ -11406,7 +11409,7 @@ dialog.fw-notes-dlg .fw-dlg-body {
   min-width: 700px; /* #410: the Discovered box is two thirds wide; below this the table scrolls */
 }
 .add-scan-table table {
-  min-width: 880px;
+  min-width: 940px; /* the fixed columns take 766 px with the selection column, the name keeps 170 */
 }
 .add-table thead th {
   height: 38px;
@@ -11526,7 +11529,7 @@ dialog.fw-notes-dlg .fw-dlg-body {
   width: 204px;
 }
 .add-scan-table col.c-name {
-  width: 26%;
+  width: auto; /* #811: the name takes what the fixed columns leave, so no column is cut off while there is room */
 }
 .add-scan-table col.c-ip {
   width: 130px;
@@ -11535,20 +11538,13 @@ dialog.fw-notes-dlg .fw-dlg-body {
   width: 160px;
 }
 .add-scan-table col.c-fw {
-  width: 100px;
+  width: 110px;
 }
 .add-scan-table col.c-st {
-  width: 130px;
+  width: 152px; /* "Address changed" and "No valid answer" fit */
 }
 .add-scan-table col.c-act {
   width: 170px;
-}
-.add-more-known {
-  display: block;
-  padding: var(--sp-10) var(--sp-16);
-  font-size: 12.5px;
-  color: var(--color-text-2);
-  text-decoration: none;
 }
 .add-empty h2 {
   font-size: 16px;

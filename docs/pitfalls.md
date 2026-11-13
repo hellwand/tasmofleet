@@ -280,6 +280,21 @@ means nothing stops you: you have to know it. The full working rules are in
 - **Enforced:** layout guards in `e2e/tests/` (`tablet-guards.spec.ts`,
   `layout-guard-words.spec.ts`, `whats-new-layout.spec.ts`).
 
+### A tooltip over the next row, and a bubble for a name that fits (#811)
+
+- **Happened:** the Network scan table's name cell had `title` = its own text. The tooltip script showed it
+  for every name, below the cell, and a cell fills its whole row, so the bubble lay over the next row's name.
+  The Devices list name cell had the same title and the same placement.
+- **Rule:** a title that only repeats the element's text shows only while that text is cut off, and the
+  bubble of anything inside a table cell sits beside it, never below it (`static/tooltip.js`). A new table
+  needs no special case for this.
+- **Enforced:** `e2e/tests/scan-table.spec.ts` for the scan table (the markup it loads is
+  `testdata/scan/*.html`, kept equal to the templates by `TestScanResultFixtures`; regenerate with
+  `-update-scan-fixtures`) and `e2e/tests/pinned-overlap.spec.ts` for the Devices list (every titled
+  element of two rows, the pinned Power, Status and Actions columns included). Both use `hoverTip` in
+  `e2e/support/layout.ts`. The Backups and Transactions tables run the same script but have no guard of
+  their own; a very long explanation (about 100 characters or more) in a dense row is not guarded.
+
 ### A visible browser opened on the maintainer's desktop (2026-11-01)
 
 - **Happened:** an agent used the Playwright MCP browser tools, which open a headed

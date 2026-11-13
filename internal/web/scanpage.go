@@ -1,6 +1,7 @@
 package web
 
 import (
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -10,6 +11,7 @@ import (
 	"time"
 
 	"github.com/hellwand/tasmofleet/internal/discovery"
+	"github.com/hellwand/tasmofleet/internal/fwselect"
 	"github.com/hellwand/tasmofleet/internal/model"
 	"github.com/hellwand/tasmofleet/internal/netaddr"
 	"github.com/hellwand/tasmofleet/internal/sysconfig"
@@ -49,9 +51,7 @@ type scanBodyView struct {
 	Filter                               string
 	Chips                                []scanChip
 	Rows                                 []scanRow
-	More                                 int    // known devices left out of the All view
-	MoreHref                             string // the Known view, which lists them all
-	Selectable                           bool   // at least one row can be selected for "Add selected"
+	Selectable                           bool // at least one row can be selected for "Add selected"
 	HasDefault                           bool
 	// Scheduled is the Add page box's line about the scheduled scan ("off", "every 24h"); SettingsHref
 	// is where it is set ("" without the settings page).
@@ -76,6 +76,7 @@ type scanChip struct {
 // scanRow is one Tasmota device that answered.
 type scanRow struct {
 	Name, Address, MAC, Firmware string
+	FirmwareTip                  string // the build behind the version, as the Devices list words it ("" when the string names none)
 	Label                        string
 	Tone                         ui.Tone
 	Kind                         string // new, known, ignored or other (the filter it belongs to)
@@ -84,8 +85,22 @@ type scanRow struct {
 	AddHref, OpenHref, ReviewRef string
 }
 
-// scanKnownShown is how many known devices the All view lists before "and N more".
-const scanKnownShown = 6
+// scanFirmware reads Tasmota's version string ("16.0.0(release-tasmota)") the way the Devices list
+// shows it: the number as the text and the build as the tooltip ("Tasmota 16.0.0 (tasmota)"). Both
+// come from the parser the Devices list's identity comes from (fwselect.DetectInfo1) and from
+// firmwareTitle, so the two pages cannot word a build differently. A string that is no version is
+// shown as it is, without a tooltip.
+func scanFirmware(raw string) (text, tip string) {
+	payload, err := json.Marshal(struct{ Info1 struct{ Version string } }{struct{ Version string }{raw}})
+	if err != nil {
+		return strings.TrimSpace(raw), ""
+	}
+	id, err := fwselect.DetectInfo1(payload, model.Identity{})
+	if err != nil {
+		return strings.TrimSpace(raw), ""
+	}
+	return id.Version, firmwareTitle(id)
+}
 
 func (h *handler) scanRender(w http.ResponseWriter, r *http.Request, status int, t scanTab) {
 	h.show(w, r, status, "discovery_scan", h.view(r, "Network scan", "discovery", t), scanPage(t))
@@ -221,23 +236,12 @@ func (h *handler) scanBodyData(r *http.Request, s discovery.ScanStatus) scanBody
 		return scanChip{Label: label, Href: href, N: n, Current: b.Filter == f}
 	}
 	b.Chips = []scanChip{chip("All", "", len(rows)), chip("New", "new", counts["new"]), chip("Known", "known", counts["known"]), chip("Ignored", "ignored", counts["ignored"])}
-	known := 0
 	for _, row := range rows {
-		switch {
-		case b.Filter != "" && row.Kind != b.Filter:
+		if b.Filter != "" && row.Kind != b.Filter {
 			continue
-		case b.Filter == "" && row.Kind == "known":
-			known++
-			if known > scanKnownShown {
-				b.More++
-				continue
-			}
 		}
 		b.Selectable = b.Selectable || row.Kind == "new"
 		b.Rows = append(b.Rows, row)
-	}
-	if b.More > 0 {
-		b.MoreHref = chip("Known", "known", 0).Href
 	}
 	if !b.Running {
 		addrs := strconv.Itoa(s.Total) + " addresses"
@@ -276,7 +280,8 @@ type scanProposal struct {
 // scanRowOf sorts one hit into the result: a new device can be added or ignored, an ignored one
 // restored, a known one opened; an address change or conflict waits in the Discovered box of the Add page.
 func (h *handler) scanRowOf(base string, hit discovery.Hit, byMAC map[string]scanProposal, devs map[string]model.Device) scanRow {
-	row := scanRow{Name: hit.Name, Address: netaddr.Display(hit.Address, hit.Port, "http"), MAC: strings.ToUpper(hit.MAC), Firmware: hit.Version, Kind: "other"}
+	row := scanRow{Name: hit.Name, Address: netaddr.Display(hit.Address, hit.Port, "http"), MAC: strings.ToUpper(hit.MAC), Kind: "other"}
+	row.Firmware, row.FirmwareTip = scanFirmware(hit.Version)
 	if row.Name == "" {
 		row.Name = row.Address
 	}
