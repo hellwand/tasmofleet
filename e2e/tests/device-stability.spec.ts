@@ -1,7 +1,8 @@
 import { mkdirSync } from "node:fs";
 import type { Page } from "@playwright/test";
 import { test, expect } from "../support/fixtures";
-import { expectNoOverflow } from "../support/layout";
+import { expectNoOverflow, overflowProblem } from "../support/layout";
+import { seedWifiSamples } from "../support/seed";
 import { App, Devenv, freePort, startApp, startDevenv, writeTasmoAdminDir } from "../support/stack";
 
 // Stability per device (#325): restart reasons, boot loops and weak Wi-Fi on the device Overview, the
@@ -30,6 +31,10 @@ test.beforeAll(async () => {
     },
   });
   app.cli(["import", "tasmoadmin", writeTasmoAdminDir(env.devices)]);
+  // The Wi-Fi sparkline needs two hourly samples; the app writes one per hour from the time it runs, so a
+  // fresh instance has none. Twelve past hours that average -84 dBm, like the device's own reading, keep
+  // the verdict and the card's numbers as they were (#679).
+  await seedWifiSamples(app, "st-weakwifi", [-82, -86, -84, -86, -85, -83, -85, -84, -88, -81, -84, -80]);
 });
 test.afterAll(async () => {
   await app?.stop();
@@ -151,4 +156,37 @@ for (const width of [375, 1280]) {
       await expectNoOverflow(page, "dashboard with stability reasons");
     });
   }
+}
+
+// #679: the 24 h sparkline is a stretchable SVG (preserveAspectRatio none, strokes that do not scale), but a
+// max-width of 240 px held it at that width while its column grew: at 540 px it filled 68 %, at 1280 px 56 %,
+// and the rest of the row stayed empty. It must use the whole value column at every width, keeping its height.
+// 375 and 412 are the phone widths of the report (the column is narrower than 240 px there, so they pass with
+// the cap too); 540 is where the cap shows on a phone held sideways, 1280 on a desktop. One test per scheme
+// walks all four widths, so the test as a whole fails whenever any width does.
+for (const scheme of ["light", "dark"] as const) {
+  test(`the Wi-Fi sparkline fills its column at every width (${scheme})`, async ({ page }) => {
+    await page.emulateMedia({ colorScheme: scheme });
+    const bad: string[] = [];
+    for (const width of [375, 412, 540, 1280]) {
+      await openOverview(page, "st-weakwifi", width);
+      const spark = page.locator("#stability svg.stab-spark");
+      // without the seeded samples there is no sparkline and nothing below would measure anything
+      await expect(spark, `${width}px: the seeded samples draw a sparkline`).toHaveCount(1);
+      await page.evaluate(() => document.fonts.ready);
+      const m = await spark.evaluate((svg) => {
+        const col = svg.closest("dd")!;
+        const cs = getComputedStyle(col);
+        const inner = col.getBoundingClientRect().width - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight);
+        const r = svg.getBoundingClientRect();
+        return { svg: r.width, col: inner, height: r.height };
+      });
+      if (Math.abs(m.svg - m.col) > 0.5) bad.push(`${width}px: the sparkline is ${m.svg}px in a column of ${m.col}px`);
+      if (m.height !== 28) bad.push(`${width}px: the sparkline is ${m.height}px high, not 28px`);
+      const over = await overflowProblem(page, `stability sparkline at ${width}px`);
+      if (over) bad.push(over);
+      await shot(page, `sparkline-weakwifi-${width}-${scheme}`);
+    }
+    expect(bad, "a sparkline short of its column").toEqual([]);
+  });
 }

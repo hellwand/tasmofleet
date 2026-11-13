@@ -124,10 +124,10 @@
       /* storage unavailable: no restore */
     }
   });
-  // The device list's pill row scrolls sideways on a narrow screen, and every filter choice loads the
-  // page again, which would put the row back to its start and move every pill (#116). The scroll
-  // position is kept across that one reload: saved when a pill or a select in the row is used, restored
-  // (once) on the next page.
+  // A pill row that scrolls sideways on a narrow screen (Devices > Backups, the Policy pages; the device
+  // list's row wraps instead since #678), and every filter choice loads the page again, which would put
+  // the row back to its start and move every pill (#116). The scroll position is kept across that one
+  // reload: saved when a pill or a select in the row is used, restored (once) on the next page.
   var chipsKey = "tf-chips-scroll";
   function saveChipsScroll(e) {
     var row = e.target instanceof Element && e.target.closest(".dv-chips");
@@ -154,8 +154,8 @@
     } catch (err) {
       /* storage unavailable */
     }
-    // An active pill the row hides (a dashboard or Backups tile opens the list filtered; on a phone
-    // the row is wider than the screen) is scrolled into view, so the filter shows. Only the row
+    // An active pill the row hides (a Backups or Policy tile opens the page filtered; on a phone the
+    // row is wider than the screen) is scrolled into view, so the filter shows. Only the row
     // scrolls, never the page (#381). Not after the row's own reload: the person just used the row
     // where it was, and the default "All" pill is current whenever only Chip or Tag is chosen, so
     // scrolling it into view would throw the row back to its start (#116, #428).
