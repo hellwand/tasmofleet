@@ -66,6 +66,7 @@ type tableDef struct {
 // they need more room than the page has (the device list, D19). A saved layout keeps that size:
 // its weights are tenths of the pixels at saving, and the table is at least as wide as their sum
 // (data-basew, applied by tables.js), so widening a column never squeezes the others into the frame.
+// The widths are the layout's own, without the stretch to a wider frame (tablePref.B, #805).
 var pxTables = map[string]bool{"devices": true}
 
 func c(id, label string, w float64) colDef { return colDef{ID: id, Label: label, Weight: w} }
@@ -123,8 +124,21 @@ const (
 	maxWeight    = 90.0
 	maxPrefBytes = 4096
 	selectShare  = 3.5 // percent of the table for a leading checkbox column
-	selectPx     = 44  // the same column of a table with pixel widths (Px)
+	// selectPx is that column of a table with pixel widths at its narrowest: the width of its
+	// checkbox, which tables.js (fitPinned) gives it while selectShare of the table is less.
+	selectPx = 43
 )
+
+// tableWidth is the width a table with pixel widths needs for data pixels of data columns: with a
+// checkbox column, that column as the browser draws it, selectShare of the table but never narrower
+// than selectPx. A fixed 44 px made a table that fitted its frame 1 px too wide after a reload, and
+// gave a wide table's data columns less than saved (#805). tables.js has the same function.
+func tableWidth(data float64, sel bool) float64 {
+	if !sel {
+		return data
+	}
+	return math.Max(data+selectPx, data/(1-selectShare/100))
+}
 
 // tablePref is the stored layout of one table.
 type tablePref struct {
@@ -136,7 +150,18 @@ type tablePref struct {
 	// "right" or "none" (D19). A layout saved before pinning existed has no P and reads as
 	// the defaults (devices: Name left, Power and Actions right).
 	P map[string]string `json:"p,omitempty"`
+	// B: W holds the layout's own pixel widths of a pxTable, saved without the stretch to a wider
+	// frame (#805). Before 0.36.1 a save stored the widths the browser drew, stretched to the frame,
+	// so a layout without B has widths nobody chose (showing three columns made the maintainer's
+	// layout 1977 px wide in a 1574 px frame). Its proportions are kept and its total is not: it is
+	// laid out as shares without a minimum width of its own (fitted to the window down to the
+	// scroll floor of tables.js), and its next save stores the widths with B. No migration: the
+	// stored rows stay as they are until then.
+	B bool `json:"b,omitempty"`
 }
+
+// ownWidths says whether the layout's widths have a size (B), not only proportions.
+func (p tablePref) ownWidths() bool { return p.B || len(p.W) == 0 }
 
 func (p tablePref) empty() bool {
 	return len(p.W) == 0 && len(p.H) == 0 && len(p.V) == 0 && len(p.O) == 0 && len(p.P) == 0
@@ -321,6 +346,7 @@ func validatePref(key string, raw []byte) (string, error) {
 		if slices.Equal(clean.O, defaultOrder(def)) {
 			clean.O = nil // the default order needs no storage
 		}
+		clean.B = p.B && pxTables[def.Key] && len(clean.W) > 0 // only widths of a pixel table have a size
 		if clean.empty() {
 			return "", nil
 		}
@@ -810,8 +836,8 @@ func rewriteTable(key, tag, body string, prefs map[string]string, sorts map[stri
 	attrs := ` data-cols="` + strings.Join(ids, ",") + `" data-order="` + strings.Join(orderIDs, ",") + `"`
 	if pxTables[key] {
 		attrs += ` data-px`
-		if custom {
-			attrs += ` data-basew="` + strconv.Itoa(int(math.Round(total*10+fixed/selectShare*selectPx))) + `"`
+		if custom && pref.ownWidths() {
+			attrs += ` data-basew="` + strconv.Itoa(int(math.Round(tableWidth(total*10, fixed > 0)))) + `"`
 		}
 	}
 	if lead != key {

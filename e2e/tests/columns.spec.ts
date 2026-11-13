@@ -243,6 +243,182 @@ test("Columns menu hides and shows columns, and Reset to default restores the ta
   await expect(page.locator('table[data-table="audit"]')).not.toHaveClass(/tfix/);
 });
 
+// #805. A saved layout of the device table holds pixel widths, and the table is at least as wide as
+// their sum (data-basew); a wider frame stretches every column. A save stored the widths the browser
+// drew, stretch and rounding included, and the server counted the 43 px checkbox column as 44: a
+// layout saved while the table fitted came back 1 px wider than its frame (a scrollbar that scrolls
+// 1 px), and showing a column stored the stretched widths of all the others, so at 1920 px the table
+// scrolled after one more column. The layouts are the maintainer's from the live database: as 0.36.0
+// stored it (no "b"), and as 0.36.0 stored it after showing three more columns at 1920 px.
+const ownerLayout = {
+  w: { actions: 5.7, address: 13.3, family: 9.8, firmware: 9.3, name: 22.8, power: 7.5, reach: 14.2, status: 10.5, uptime: 11.5, wifi: 11.9 },
+  h: ["restart"],
+  o: ["status", "wifi", "reach", "firmware", "family", "address", "uptime", "restart", "otaurl", "grouptopic", "power"],
+};
+const ownerShown = {
+  w: { name: 28.7, status: 13.2, wifi: 15, reach: 17.9, firmware: 11.7, family: 12.4, address: 16.7, uptime: 14.5, restart: 14.7, otaurl: 14.7, grouptopic: 14.7, power: 9.4, actions: 7.2 },
+  v: ["grouptopic", "otaurl"],
+  o: ownerLayout.o,
+};
+/** The device table's frame, its saved size and its header widths, read in one step from a table the
+ * script has fitted (a live reload swaps the table at any time; a fitted one has its minimum width). */
+async function deviceFrame(page: Page) {
+  await page.evaluate(() => document.fonts.ready);
+  let m = { client: 0, scroll: 0, basew: 0, min: 0, widths: [] as number[] };
+  await expect
+    .poll(
+      async () =>
+        (m = await page.evaluate(() => {
+          const t = document.querySelector<HTMLTableElement>('table[data-table="devices"]');
+          const f = t?.parentElement;
+          if (!t || !f || !f.classList.contains("is-js")) return { client: 0, scroll: 0, basew: 0, min: 0, widths: [] };
+          return {
+            client: f.clientWidth,
+            scroll: f.scrollWidth,
+            basew: Number(t.getAttribute("data-basew") ?? 0),
+            min: parseFloat(t.style.minWidth) || 0,
+            widths: [...t.tHead!.rows[0].cells].map((c) => c.getBoundingClientRect().width),
+          };
+        })).min,
+      { timeout: 15_000 },
+    )
+    .toBeGreaterThan(0);
+  return m;
+}
+/** Ticks or unticks a column in the Columns menu and returns the layout the page saved. */
+async function showColumn(page: Page, id: string, on: boolean): Promise<{ w: Record<string, number> }> {
+  const menu = page.locator("details.colmenu").first();
+  if (!(await menu.evaluate((d) => (d as HTMLDetailsElement).open))) await menu.locator("summary").click();
+  const done = saved(page, "table.devices");
+  const box = menu.locator(`[data-colid="${id}"]`);
+  await (on ? box.check() : box.uncheck());
+  return (await done).request().postDataJSON();
+}
+
+// The layout is stored without "b" (as 0.36.0 stored it): this covers its conversion on the first save
+// and that a repeated save keeps its size. The 1 px of the selection column is pinned by the test
+// "the selection column counts as drawn" below, which sizes the frame from the layout's own widths.
+test("a layout saved while the table fits its frame still fits it after a reload (#805)", async ({ page }) => {
+  await page.setViewportSize({ width: 1300, height: 900 });
+  await page.setExtraHTTPHeaders(adam);
+  await page.goto(app.url + "/devices");
+  try {
+    expect(await postPref(page, "table.devices", ownerLayout)).toBe(204);
+    await page.reload();
+    const start = await deviceFrame(page);
+    expect(start.scroll, "the layout fits a 1300 px window to begin with").toBeLessThanOrEqual(start.client);
+    // a save that leaves the visible columns as they were, made while the table fills its frame
+    await showColumn(page, "otaurl", true);
+    await showColumn(page, "otaurl", false);
+    const inPage = await deviceFrame(page);
+    await page.reload();
+    const after = await deviceFrame(page);
+    expect(after.scroll, "1 px too wide is a scrollbar: no tolerance").toBeLessThanOrEqual(after.client);
+    expect(Math.abs(after.basew - inPage.basew), "the page and the server give the saved layout the same size").toBeLessThanOrEqual(0.5);
+    // saving again without a change keeps the size: no save adds to it
+    await showColumn(page, "otaurl", true);
+    await showColumn(page, "otaurl", false);
+    await page.reload();
+    const again = await deviceFrame(page);
+    expect(again.scroll).toBeLessThanOrEqual(again.client);
+    expect(Math.abs(again.min - after.min), "a second save without a change").toBeLessThanOrEqual(0.5);
+  } finally {
+    await resetAll(page, "/devices", "table.devices");
+  }
+});
+
+test("showing a column adds its width and stores the other columns as they were saved, not as the frame stretches them (#805)", async ({ page }) => {
+  await page.setViewportSize({ width: 1920, height: 1080 });
+  await page.setExtraHTTPHeaders(adam);
+  await page.goto(app.url + "/devices");
+  try {
+    expect(await postPref(page, "table.devices", ownerLayout)).toBe(204);
+    await page.reload();
+    const start = await deviceFrame(page);
+    expect(start.scroll).toBeLessThanOrEqual(start.client);
+    // a save that changes nothing in view: what this version stores for the layout
+    await showColumn(page, "otaurl", true);
+    const before = (await showColumn(page, "otaurl", false)).w;
+    const one = (await showColumn(page, "restart", true)).w;
+    const ids = Object.keys(before);
+    // widths are tenths of pixels, saved as whole pixels: one pixel is rounding, the stretch is a third
+    const px = (a: number, b: number) => Math.round(Math.abs(a - b) * 10);
+    for (const id of ids) expect(px(one[id], before[id]), `${id} keeps its saved width when Last restart is shown`).toBeLessThanOrEqual(1);
+    const mean = ids.reduce((a, id) => a + before[id], 0) / ids.length;
+    expect(px(one.restart, mean), "the new column gets the mean of the saved widths").toBeLessThanOrEqual(1);
+    const shown = await deviceFrame(page);
+    expect(shown.scroll, "one more column still fits a 1920 px window").toBeLessThanOrEqual(shown.client);
+    await showColumn(page, "otaurl", true);
+    await showColumn(page, "grouptopic", true);
+    const three = await deviceFrame(page);
+    expect(three.scroll, "three more columns still fit a 1920 px window").toBeLessThanOrEqual(three.client);
+    await page.reload();
+    const reloaded = await deviceFrame(page);
+    expect(reloaded.scroll).toBeLessThanOrEqual(reloaded.client);
+    expect(Math.abs(reloaded.basew - three.basew), "the page and the server give the layout the same size").toBeLessThanOrEqual(0.5);
+  } finally {
+    await resetAll(page, "/devices", "table.devices");
+  }
+});
+
+test("a saved layout is as wide as its columns: the selection column counts as drawn (#805)", async ({ page }) => {
+  await page.setViewportSize({ width: 1300, height: 900 });
+  await page.setExtraHTTPHeaders(adam);
+  await page.goto(app.url + "/devices");
+  try {
+    // the maintainer's widths as this version saves them: 1165 px of data columns, and the selection
+    // column drawn at its 43 px checkbox (3.5 % of the table is less at this width). The frame is sized
+    // from these numbers, not from the page's data-basew: a page or server that counts the selection
+    // column wrongly would move a frame sized from data-basew along with the table.
+    const data = Math.round(Object.values(ownerLayout.w).reduce((a, b) => a + b, 0) * 10);
+    const need = data + 43;
+    expect(await postPref(page, "table.devices", { ...ownerLayout, b: true })).toBe(204);
+    await page.reload();
+    const wide = await deviceFrame(page);
+    expect(wide.basew, "the saved layout is as wide as its data columns and the drawn checkbox").toBe(need);
+    // a window whose frame is exactly that wide: the table fits it; one pixel less and it scrolls by one
+    for (const less of [0, 1]) {
+      await page.setViewportSize({ width: 1300 - (wide.client - need) - less, height: 900 });
+      await page.reload();
+      const f = await deviceFrame(page);
+      expect(f.client, "the frame follows the window").toBe(need - less);
+      expect(f.scroll, less ? "one pixel too narrow" : "a frame as wide as the drawn columns fits them").toBe(f.client + less);
+    }
+  } finally {
+    await page.setViewportSize({ width: 1300, height: 900 });
+    await resetAll(page, "/devices", "table.devices");
+  }
+});
+
+test("a layout stored with stretched widths before 0.36.1 fits its window again, and its first save changes nothing in view (#805)", async ({ page }) => {
+  await page.setViewportSize({ width: 1920, height: 1080 });
+  await page.setExtraHTTPHeaders(adam);
+  await page.goto(app.url + "/devices");
+  try {
+    expect(await postPref(page, "table.devices", ownerShown)).toBe(204);
+    await page.reload();
+    const start = await deviceFrame(page);
+    expect(start.scroll, "the 14 columns fit a 1920 px window without a reset").toBeLessThanOrEqual(start.client);
+    // a save that changes nothing (Status down and up again; each move saves and reloads)
+    for (const dir of ["down", "up"]) {
+      const menu = page.locator("details.colmenu").first();
+      if (!(await menu.evaluate((d) => (d as HTMLDetailsElement).open))) await menu.locator("summary").click();
+      const done = saved(page, "table.devices");
+      const reloaded = page.waitForEvent("load");
+      await menu.locator(`[data-move="${dir}"][data-moveid="status"]`).click();
+      await done;
+      await reloaded;
+    }
+    await page.reload();
+    const after = await deviceFrame(page);
+    expect(after.scroll).toBeLessThanOrEqual(after.client);
+    expect(after.widths.length).toBe(start.widths.length);
+    after.widths.forEach((w, i) => expect(Math.abs(w - start.widths[i]), `column ${i + 1} after the first save`).toBeLessThanOrEqual(1.5));
+  } finally {
+    await resetAll(page, "/devices", "table.devices");
+  }
+});
+
 test("the page size is saved with the other preferences", async ({ page, browser }) => {
   await page.setViewportSize({ width: 1280, height: 800 });
   await page.setExtraHTTPHeaders(adam);

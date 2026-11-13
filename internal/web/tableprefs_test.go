@@ -71,6 +71,10 @@ func TestValidatePref(t *testing.T) {
 		{"unknown table", "table.nope", `{}`, "", true},
 		{"unknown key", "other", `{}`, "", true},
 		{"unknown field", "table.devices", `{"w":{},"x":1}`, "", true},
+		// #805: "b" marks widths saved without the frame's stretch; it means something only for widths of a pixel table
+		{"own widths", "table.devices", `{"w":{"name":25},"b":true}`, `{"w":{"name":25},"b":true}`, false},
+		{"own widths without widths", "table.devices", `{"h":["family"],"b":true}`, `{"h":["family"]}`, false},
+		{"own widths of a table of shares", "table.audit", `{"w":{"actor":20},"b":true}`, `{"w":{"actor":20}}`, false},
 		{"not json", "table.devices", `[`, "", true},
 		{"trailing data", "table.devices", `{} {}`, "", true},
 		{"oversize", "table.devices", `{"h":["` + strings.Repeat("a", maxPrefBytes) + `"]}`, "", true},
@@ -575,15 +579,64 @@ func TestNoColumnsMenuAboveATableWithFewerThanTwoRows(t *testing.T) {
 // A saved layout must keep that size, or widening one column would squeeze every other column
 // into the frame and the widened one would end up narrower than before. The server marks the
 // table (data-px) and names the width the saved weights add up to (tenths of pixels, plus the
-// 44 px selection column), which tables.js applies as the table's minimum width.
+// selection column as the browser draws it, see TestPixelTableCountsTheSelectionColumnAsDrawn),
+// which tables.js applies as the table's minimum width. Only a layout saved with its own widths
+// ("b", #805) has a size; TestPixelTableLayoutSavedBeforeOwnWidthsIsProportional has the others.
 func TestPixelTableKeepsItsSizeWithASavedLayout(t *testing.T) {
 	def := string(applyTablePrefs([]byte(sampleTable), nil))
 	if !strings.Contains(def, " data-px") || strings.Contains(def, "data-basew") {
 		t.Errorf("default layout: want data-px and no saved size:\n%s", def)
 	}
-	saved := string(applyTablePrefs([]byte(sampleTable), map[string]string{"table.devices": `{"w":{"firmware":18,"family":6}}`}))
-	// 28+17+15+18+6+13+11+12+18+7+5 = 146 tenths of pixels, plus the selection column
-	if !strings.Contains(saved, `data-basew="1544"`) {
-		t.Errorf("saved layout: want data-basew=\"1564\":\n%s", saved)
+	saved := string(applyTablePrefs([]byte(sampleTable), map[string]string{"table.devices": `{"w":{"firmware":18,"family":6},"b":true}`}))
+	// 28+17+15+18+6+13+11+12+18+7+5 = 150 tenths of pixels; at 1500 px the selection column is
+	// 3.5 % of the table: 1500 / 0.965 = 1554.4
+	if !strings.Contains(saved, `data-basew="1554"`) {
+		t.Errorf("saved layout: want data-basew=\"1554\":\n%s", saved)
+	}
+}
+
+// Why (#805): data-basew is the table's minimum width. The selection column is drawn at 3.5 % of
+// the table, but never narrower than its checkbox (43 px, which the fit in tables.js gives it). A
+// fixed 44 px made a table that fitted its frame 1 px too wide after a reload below about 1230 px
+// (a scrollbar that scrolls 1 px), and above that it gave the data columns less than saved (the
+// 69 px column of a 1977 px table counted as 44), so the table changed width on the next live
+// reload. tables.js computes the same number (tableWidth), so a page and its reload agree.
+func TestPixelTableCountsTheSelectionColumnAsDrawn(t *testing.T) {
+	cases := []struct{ name, layout, want string }{
+		// the maintainer's layout (#805): 1165 px of data columns; 3.5 % of 1208 is 42.3, less than the checkbox
+		{"narrow: the checkbox's width", `{"w":{"actions":5.7,"address":13.3,"family":9.8,"firmware":9.3,"name":22.8,"power":7.5,"reach":14.2,"status":10.5,"uptime":11.5,"wifi":11.9},"h":["restart"],"b":true}`, `data-basew="1208"`},
+		// 1908 px of data columns: the selection column is 3.5 % of 1908 / 0.965 = 1977.2
+		{"wide: 3.5 % of the table", `{"w":{"name":28.7,"status":13.2,"wifi":15,"reach":17.9,"firmware":11.7,"family":12.4,"address":16.7,"uptime":14.5,"restart":14.7,"otaurl":14.7,"grouptopic":14.7,"power":9.4,"actions":7.2},"v":["grouptopic","otaurl"],"b":true}`, `data-basew="1977"`},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			out := string(applyTablePrefs([]byte(sampleTable), map[string]string{"table.devices": c.layout}))
+			if !strings.Contains(out, c.want) {
+				t.Errorf("want %s in\n%s", c.want, out)
+			}
+		})
+	}
+}
+
+// Why (#805): before 0.36.1 a save stored the widths the browser drew, stretched to the frame, so
+// such a layout (no "b") holds widths nobody chose: the maintainer's layout came back 1977 px wide
+// in a 1574 px frame after showing three columns. Its total cannot be trusted, its proportions can:
+// it is laid out like a layout of shares (the colgroup as before, no minimum width of its own), so it
+// fits the window down to the scroll floor of tables.js, and the next save stores widths with "b".
+func TestPixelTableLayoutSavedBeforeOwnWidthsIsProportional(t *testing.T) {
+	old := `{"w":{"name":28.7,"status":13.2,"wifi":15,"reach":17.9,"firmware":11.7,"family":12.4,"address":16.7,"uptime":14.5,"restart":14.7,"otaurl":14.7,"grouptopic":14.7,"power":9.4,"actions":7.2},"v":["grouptopic","otaurl"]}`
+	out := string(applyTablePrefs([]byte(sampleTable), map[string]string{"table.devices": old}))
+	for _, want := range []string{" data-px", "tfix", `<col data-id="name" width="14.52%">`} {
+		if !strings.Contains(out, want) {
+			t.Errorf("missing %q in\n%s", want, out)
+		}
+	}
+	if strings.Contains(out, "data-basew") {
+		t.Errorf("a layout saved before #805 has no size of its own:\n%s", out)
+	}
+	// a layout without widths (only hidden columns) has the default widths, which are no stretch
+	hid := string(applyTablePrefs([]byte(sampleTable), map[string]string{"table.devices": `{"h":["family"]}`}))
+	if !strings.Contains(hid, "data-basew=") {
+		t.Errorf("hidden columns only: want data-basew:\n%s", hid)
 	}
 }

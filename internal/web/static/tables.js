@@ -16,7 +16,9 @@
   var SCROLL_MIN_PX = 96; // below this per column a table with a saved layout scrolls instead of squeezing
   var MIN_PCT = 3; // the server clamps to the same share
   var MAX_PCT = 90; // and to the same maximum
-  var SELECT_PX = 44; // the checkbox column of a table with pixel widths (data-px)
+  // The checkbox column of a table with pixel widths (data-px) at its narrowest: the width of its
+  // checkbox, which fitPinned gives it while 3.5 % of the table is less (tableprefs.go: selectPx).
+  var SELECT_PX = 43;
   var SELECT_PCT = 3.5; // leading checkbox column, as on the server
   var desktop = window.matchMedia("(min-width: 45rem)"); // the table (not the phone list) shows from here
   var timers = {};
@@ -156,6 +158,90 @@
     });
   }
 
+  // The width a table with pixel widths needs for `data` pixels of data columns: the checkbox column
+  // as the browser draws it, 3.5 % of the table but never narrower than its checkbox (#805: a fixed
+  // 44 px made a table that fitted its frame come back 1 px too wide). tableprefs.go: tableWidth.
+  function tableWidth(table, data) {
+    return hasSelect(table)
+      ? Math.max(data + SELECT_PX, data / (1 - SELECT_PCT / 100))
+      : data;
+  }
+  // and back: the data columns' share of such a table
+  function dataWidth(table, width) {
+    return hasSelect(table)
+      ? Math.min(width - SELECT_PX, width * (1 - SELECT_PCT / 100))
+      : width;
+  }
+
+  // The widths the layout itself asks for, per visible data column ({px: id -> px, s: px of the
+  // layout per drawn px}). A table with pixel widths is never narrower than its layout and fills a
+  // wider frame, so the browser draws every column wider than the layout says, and a pinned column
+  // can be widened to its content. A save took the drawn widths: it stored that stretch, and showing a
+  // column turned the stretched widths of all the others into the layout (#805). So the drawn widths
+  // are scaled back to the layout's own total: the data columns' share of data-basew, or, without one
+  // (the default layout, or a layout saved before this was fixed, which tableprefs.go lays out as
+  // shares), their width at the table's narrowest. A table of shares (no data-px) stores proportions,
+  // which a stretch does not change.
+  function layoutWidths(table) {
+    var vis = visible(table),
+      drawn = 0,
+      px = {};
+    vis.forEach(function (v) {
+      drawn += v.px;
+    });
+    var own = drawn;
+    if (table.hasAttribute("data-px") && desktop.matches && drawn > 0) {
+      var basew = Number(table.getAttribute("data-basew"));
+      own = basew > 0 ? dataWidth(table, basew) : narrowest(table);
+    }
+    var s = drawn > 0 && own > 0 ? own / drawn : 1;
+    vis.forEach(function (v) {
+      px[v.id] = v.px * s;
+    });
+    return { px: px, s: s };
+  }
+  // the data columns' width with the table at its minimum width, not stretched to the frame: set for
+  // one measurement and put back before anything is painted
+  function narrowest(table) {
+    var w = table.style.width,
+      min = table.style.minWidth,
+      sum = 0;
+    table.style.width = "0px";
+    if (!table.classList.contains("tfix")) {
+      table.style.minWidth = "0px"; // the default layout's CSS minimum is the frame (app.css)
+    }
+    visible(table).forEach(function (v) {
+      sum += v.px;
+    });
+    table.style.width = w;
+    table.style.minWidth = min;
+    return sum;
+  }
+
+  // Whole pixels that add up to the rounded total: each column rounded on its own let the sum drift by
+  // up to half a pixel per column, six pixels in a table of twelve columns (#805).
+  function wholePixels(px) {
+    var ids = Object.keys(px),
+      out = {},
+      total = 0,
+      sum = 0;
+    ids.forEach(function (id) {
+      total += px[id];
+      out[id] = Math.floor(px[id]);
+      sum += out[id];
+    });
+    ids
+      .slice()
+      .sort(function (a, b) {
+        return px[b] - out[b] - (px[a] - out[a]);
+      })
+      .slice(0, Math.round(total) - sum)
+      .forEach(function (id) {
+        out[id]++;
+      });
+    return out;
+  }
+
   // write: weights (any unit) -> classes, <colgroup>, handles' values
   function write(table, hidden, weight) {
     var c = cols(table);
@@ -187,7 +273,8 @@
     if (table.hasAttribute("data-px")) {
       table.setAttribute(
         "data-basew",
-        String(Math.round(total + (hasSelect(table) ? SELECT_PX : 0))),
+        // whole pixels, as they are saved: the server computes the same number from them
+        String(Math.round(tableWidth(table, Math.round(total)))),
       );
     }
     var cg = document.createElement("colgroup");
@@ -589,18 +676,16 @@
   }
 
   function snapshot(table) {
-    var hidden = hiddenIdx(table),
-      weight = {};
-    visible(table).forEach(function (v) {
-      weight[v.id] = v.px;
-    });
-    return { hidden: hidden, weight: weight };
+    return { hidden: hiddenIdx(table), weight: layoutWidths(table).px };
   }
 
   function document_(table) {
     var c = cols(table),
       hid = hiddenIdx(table),
       vis = visible(table),
+      px = table.hasAttribute("data-px")
+        ? wholePixels(layoutWidths(table).px)
+        : null,
       sum = 0,
       w = {},
       h = [];
@@ -608,8 +693,8 @@
       sum += v.px;
     });
     vis.forEach(function (v) {
-      w[v.id] = table.hasAttribute("data-px")
-        ? Math.min(MAX_PCT, Math.max(MIN_PCT, Math.round(v.px) / 10)) // tenths of the pixels
+      w[v.id] = px
+        ? Math.min(MAX_PCT, Math.max(MIN_PCT, px[v.id] / 10)) // tenths of the pixels
         : Math.max(MIN_PCT, Math.round((v.px / sum) * 1000) / 10);
     });
     var v = [];
@@ -626,7 +711,11 @@
         h.push(col.id);
       }
     });
-    return { w: w, h: h, v: v, o: order(table), p: pins(table) };
+    var doc = { w: w, h: h, v: v, o: order(table), p: pins(table) };
+    if (px) {
+      doc.b = true; // the layout's own widths, without the frame's stretch (#805, tableprefs.go)
+    }
+    return doc;
   }
 
   // movable column ids in the user's order (data-order, the order of the Columns menu; the
@@ -839,13 +928,15 @@
       parseFloat(ths.paddingLeft) +
       parseFloat(ths.paddingRight);
     cell.removeChild(zero);
+    // the snapshot is in the layout's pixels, the measurements above are drawn ones (#805)
     var snap = takeSnap(table),
+      s = snap.s,
       total = 0;
     vis.forEach(function (x) {
       total += snap.px[x.id];
     });
-    var limit = Math.min(cap, total - MIN_PX * (vis.length - 1));
-    var target = Math.max(MIN_PX, Math.min(want, limit));
+    var limit = Math.min(cap * s, total - MIN_PX * s * (vis.length - 1));
+    var target = Math.max(MIN_PX * s, Math.min(want * s, limit));
     var apply = function (t) {
       var others = total - snap.px[v.id],
         scale = (total - t) / others,
@@ -872,7 +963,7 @@
       if (over <= 1) {
         break;
       }
-      target = Math.min(limit, target + Math.ceil(over));
+      target = Math.min(limit, target + Math.ceil(over) * s);
       apply(target);
     }
     save(table, true);
@@ -888,15 +979,18 @@
     if (!a || !b) {
       return;
     }
-    var wa = snap.px[a.id] + dx,
-      wb = snap.px[b.id] - dx;
-    if (wa < MIN_PX) {
-      wb -= MIN_PX - wa;
-      wa = MIN_PX;
+    // dx and MIN_PX are drawn pixels, the snapshot is in the layout's (#805)
+    var d = dx * snap.s,
+      min = MIN_PX * snap.s;
+    var wa = snap.px[a.id] + d,
+      wb = snap.px[b.id] - d;
+    if (wa < min) {
+      wb -= min - wa;
+      wa = min;
     }
-    if (wb < MIN_PX) {
-      wa -= MIN_PX - wb;
-      wb = MIN_PX;
+    if (wb < min) {
+      wa -= min - wb;
+      wb = min;
     }
     var weight = {};
     vis.forEach(function (v) {
@@ -907,11 +1001,7 @@
     write(table, hiddenIdx(table), weight);
   }
   function takeSnap(table) {
-    var px = {};
-    visible(table).forEach(function (v) {
-      px[v.id] = v.px;
-    });
-    return { px: px };
+    return layoutWidths(table);
   }
 
   function refreshHandles(table) {
@@ -1066,21 +1156,19 @@
     if (!v) {
       return;
     }
-    var sumPx = 0,
+    var px = layoutWidths(table).px,
+      sumPx = 0,
       sumDef = 0;
     vis.forEach(function (x) {
-      sumPx += x.px;
+      sumPx += px[x.id];
       sumDef += x.def;
     });
     var weight = {};
-    vis.forEach(function (x) {
-      weight[x.id] = x.px;
-    });
     var target = (v.def / sumDef) * sumPx;
-    var others = sumPx - weight[v.id];
+    var others = sumPx - px[v.id];
     var scale = (sumPx - target) / others;
     vis.forEach(function (x) {
-      weight[x.id] = x === v ? target : x.px * scale;
+      weight[x.id] = x === v ? target : px[x.id] * scale;
     });
     write(table, hiddenIdx(table), weight);
   }
