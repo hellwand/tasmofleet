@@ -161,6 +161,11 @@ test("a number value follows the catalogue: range, step, and a value outside it 
   await page.locator("#rule-command").fill("Latitude");
   await page.locator("#rule-command").dispatchEvent("change");
   await expect(page.locator("#want")).toHaveAttribute("step", "any");
+  // the hint says how a coordinate is compared, so nobody expects a prefix or six decimals (#382)
+  const coordHelp = page.locator("#want-control .ufield-help");
+  await expect(coordHelp).toContainText("compared to 4 decimals");
+  await expect(coordHelp).toContainText("-90 to 90");
+  await expect(coordHelp).toContainText("48 means 48.0000");
   await page.locator("#rule-command").fill("BlinkTime");
   await page.locator("#rule-command").dispatchEvent("change");
   const want = page.locator("#want");

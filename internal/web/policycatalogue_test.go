@@ -109,6 +109,29 @@ func TestValueControlFollowsTheCatalogueKind(t *testing.T) {
 	}
 }
 
+// Why: since v0.19.0 a coordinate rule and the device's reply are both rounded to four decimals, so
+// 48.2082 and 48.208200 match and a bare "48" means 48.0000 and deviates for every device at 48.x.
+// The editor must say so (and give the range), or people type a "prefix" or worry about six decimals
+// (#382). Other decimal commands must not claim this.
+func TestCoordinateHintStatesPrecisionAndRange(t *testing.T) {
+	e, _, _ := rulesEnv(t, "")
+	body := func(cmd string) string {
+		_, b := e.do(t, "GET", "/policy/rules/value-control?command="+cmd, "admin", nil)
+		return b
+	}
+	for cmd, rng := range map[string]string{"Latitude": "-90 to 90", "Longitude": "-180 to 180"} {
+		b := body(cmd)
+		for _, w := range []string{"compared to 4 decimals", rng, "48 means 48.0000"} {
+			if !strings.Contains(b, w) {
+				t.Errorf("%s hint lacks %q:\n%s", cmd, w, b)
+			}
+		}
+	}
+	if b := body("BlinkTime"); strings.Contains(b, "4 decimals") {
+		t.Errorf("a command that is not a coordinate must not carry the coordinate hint:\n%s", b)
+	}
+}
+
 // Why: the approved design: version and feature checks warn and the rule can still be saved;
 // only a command that exists in no Tasmota version of the fleet is refused. An index the source
 // puts out of range is a warning too (the range is read heuristically).
