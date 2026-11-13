@@ -3,6 +3,7 @@ package web
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"net/url"
 	"strings"
 	"sync"
@@ -502,5 +503,72 @@ func TestSettingsNoScriptOffersTheReadInsteadOfPromisingARefresh(t *testing.T) {
 	_, body := withSettings(t, fs).do(t, "GET", "/devices/1/settings", "admin", nil)
 	if !strings.Contains(body, `<noscript><span>This page needs JavaScript to refresh by itself. <a href="/tf/devices/1/settings/form">Read the device now</a>`) {
 		t.Errorf("no <noscript> read link:\n%s", shortDump(body))
+	}
+}
+
+// logSettingsReads runs a failing Settings read and returns the page body and what the handler logged.
+func logSettingsReads(t *testing.T, readErr error) (body, logs string) {
+	t.Helper()
+	var buf strings.Builder
+	old := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelDebug})))
+	t.Cleanup(func() { slog.SetDefault(old) })
+	e := withSettings(t, &fakeSettings{readErr: readErr})
+	resp, body := e.do(t, "GET", "/devices/1/settings/form", "admin", nil)
+	if resp.StatusCode != 502 {
+		t.Fatalf("status %d", resp.StatusCode)
+	}
+	return body, buf.String()
+}
+
+// Why (#712): the page shows one of six fixed sentences, so a user who reports "the device could not be
+// read" gave us nothing to look for. One warn line must name the device, the query that failed and why,
+// and the page text must stay as it is.
+func TestFailedSettingsReadIsLoggedOnceWithDeviceCommandAndReason(t *testing.T) {
+	body, logs := logSettingsReads(t, &settings.ReadError{Cmd: "MqttUser", Err: tasmota.ErrTimeout})
+	lines := strings.Split(strings.TrimSpace(logs), "\n")
+	var hits []string
+	for _, l := range lines {
+		if strings.Contains(l, "level=WARN") && strings.Contains(l, "settings") {
+			hits = append(hits, l)
+		}
+	}
+	if len(hits) != 1 {
+		t.Fatalf("%d warn lines about the read, want exactly one:\n%s", len(hits), logs)
+	}
+	for _, want := range []string{"device=1", "cmd=MqttUser", "reason=timeout"} {
+		if !strings.Contains(hits[0], want) {
+			t.Errorf("log line lacks %q: %s", want, hits[0])
+		}
+	}
+	if !strings.Contains(body, "The device did not answer in time.") {
+		t.Errorf("the page text changed:\n%s", shortDump(body))
+	}
+}
+
+// Why (#712, safety rule 4): a device error can carry what the device answered, and a settings reply
+// holds the MQTT user name and the Wi-Fi and MQTT settings. Whatever the error text contains, the log
+// line holds the command and the error class and nothing else of it.
+func TestFailedSettingsReadLogsNoReplyValue(t *testing.T) {
+	const secret = "s3cr3t-reply-Qx7"
+	err := &settings.ReadError{Cmd: "MqttUser", Err: fmt.Errorf("%w: device said {\"MqttUser\":\"%s\"} for http://admin:%s@10.0.0.9/cm", tasmota.ErrBadResponse, secret, secret)}
+	body, logs := logSettingsReads(t, err)
+	if strings.Contains(logs, secret) {
+		t.Errorf("a reply value reached the log:\n%s", logs)
+	}
+	if strings.Contains(body, secret) {
+		t.Errorf("a reply value reached the page:\n%s", shortDump(body))
+	}
+	if !strings.Contains(logs, "cmd=MqttUser") || !strings.Contains(logs, "reason=bad-response") {
+		t.Errorf("the line lost the command or the class:\n%s", logs)
+	}
+}
+
+// Why (#712): closing the tab while a slow read runs cancels the request. That is the person leaving,
+// not a device that failed, and must not fill the log with warnings.
+func TestCancelledSettingsReadIsNotLogged(t *testing.T) {
+	_, logs := logSettingsReads(t, context.Canceled)
+	if strings.Contains(logs, "level=WARN") {
+		t.Errorf("a cancelled read was logged as a failure:\n%s", logs)
 	}
 }
