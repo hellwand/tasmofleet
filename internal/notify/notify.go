@@ -32,9 +32,12 @@ const (
 // Event names, as the JSON body carries them.
 const (
 	EventUpdateFinished = "update.finished"
-	EventBackupFailed   = "backup.scheduled_failed"
-	EventSnapshotFailed = "snapshot.failed"
-	EventTest           = "test"
+	// EventUpdateNotStarted: a scheduled update transaction was not started, because TasmoFleet was down
+	// at its start and longer than the late-start window (#603). It follows the update setting.
+	EventUpdateNotStarted = "update.not_started"
+	EventBackupFailed     = "backup.scheduled_failed"
+	EventSnapshotFailed   = "snapshot.failed"
+	EventTest             = "test"
 )
 
 // Results of an update transaction.
@@ -43,6 +46,8 @@ const (
 	ResultPartial   = "partial"
 	ResultFailed    = "failed"
 	ResultCancelled = "cancelled"
+	// ResultNotStarted: a scheduled update that never started (nothing was changed). A problem.
+	ResultNotStarted = "not_started"
 )
 
 // Event is one thing to tell. Title is the e-mail subject, Text and URL its body.
@@ -66,6 +71,8 @@ func Selected(c config.Config, ev Event) bool {
 			return false
 		}
 		return c.NotifyUpdateWhen != config.NotifyWhenProblems || ev.Result == ResultPartial || ev.Result == ResultFailed
+	case EventUpdateNotStarted:
+		return c.NotifyUpdate // a problem: also under "only problems"
 	case EventBackupFailed:
 		return c.NotifyBackup
 	case EventSnapshotFailed:
@@ -137,6 +144,23 @@ func UpdateFinished(c config.Config, batch int64, ok, failed, cancelled int, tar
 		Context: fmt.Sprintf("update job #%d (%s)", batch, res)}
 }
 
+// UpdateNotStarted is the event of a scheduled update transaction that was not started: TasmoFleet was down
+// at start and not back within the late-start window (#603). It is sent once TasmoFleet is back (at), so it
+// carries that time. target is the release (empty if the jobs differ); devices is the number of jobs not
+// started. The start reads on the server's clock (TZ), whatever zone the time comes in (the store gives UTC).
+func UpdateNotStarted(c config.Config, batch int64, devices int, target string, start, at time.Time) Event {
+	what := "Update"
+	if target != "" {
+		what = "Update to Tasmota " + target
+	}
+	return Event{Name: EventUpdateNotStarted, Result: ResultNotStarted, Title: "Scheduled update not started",
+		Text: fmt.Sprintf("TX-%04d (%s, %s) was planned for %s. TasmoFleet was down and was not back within %d minutes, "+
+			"so the update was not started and no device was changed. Plan it again to run it.",
+			batch, what, plural(devices, "device"), start.Local().Format("Mon, Jan 2 at 15:04"), int(MissedGrace/time.Minute)),
+		URL: Link(c, fmt.Sprintf("/transactions/%d", batch)), Path: fmt.Sprintf("/transactions/%d", batch), Time: at,
+		Context: fmt.Sprintf("update job #%d (%s)", batch, ResultNotStarted)}
+}
+
 // maxNamed is how many devices a message lists before it says "and N more".
 const maxNamed = 10
 
@@ -202,7 +226,8 @@ func BackupMissed(c config.Config, slot, at time.Time) Event {
 		URL: Link(c, "/devices/backups"), Path: "/devices/backups", Time: at, Context: "scheduled backup"}
 }
 
-// MissedGrace is how late a scheduled backup still starts; the text of BackupMissed names it.
+// MissedGrace is how late a scheduled backup, snapshot or update still starts; the texts of BackupMissed,
+// SnapshotMissed and UpdateNotStarted name it.
 const MissedGrace = schedule.LateStart
 
 // SnapshotMissed is the event of a scheduled database snapshot that did not happen: TasmoFleet was

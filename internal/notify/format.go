@@ -31,8 +31,10 @@ func buildWebhook(c config.Config, ev Event) (webhookRequest, error) {
 	return webhookRequest{}, fmt.Errorf("the webhook format %q is not known", c.NotifyWebhookFormat)
 }
 
-// problem says a result deserves attention (failed or partial).
-func problem(ev Event) bool { return ev.Result == ResultFailed || ev.Result == ResultPartial }
+// problem says a result deserves attention (failed, partial, or a scheduled update that did not start).
+func problem(ev Event) bool {
+	return ev.Result == ResultFailed || ev.Result == ResultPartial || ev.Result == ResultNotStarted
+}
 
 // ntfyRequest is the publish request of ntfy (docs.ntfy.sh/publish): the text is the body, the
 // headline, link and priority are headers. The priority goes as X-Priority, which ntfy reads first: a proxy may add

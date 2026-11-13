@@ -994,6 +994,10 @@ safeboot only, below), `upgrade_issued`, `await_reboot`, `verify`,
 
 | From                                   | Event                                              | Guard / condition                                                                | To                                                                                                               | Actions                                                             |
 | -------------------------------------- | -------------------------------------------------- | -------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------- |
+| scheduled                              | start_due                                          | `schedule.At` is Run (start <= now <= start + 60 min) and the start check passed (9.4b) | queued (detail: planned start and lateness)                                                                      |                                                                     |
+| scheduled                              | not_started                                        | `schedule.At` is Missed (now > start + 60 min)                                   | cancelled, `NotStarted`, LastError "TasmoFleet was down at the planned start ..."                                | notify                                                              |
+| scheduled                              | guard_refused                                      | not before the start (excluded from OTA, or the device was never free in the window) | failed (LastError = the reason)                                                                                  | notify                                                              |
+| scheduled                              | cancel                                             |                                                                                  | cancelled                                                                                                        | notify                                                              |
 | queued                                 | start                                              | slot free (scheduler)                                                            | preflight                                                                                                        | probe_identity                                                      |
 | preflight                              | identity                                           |                                                                                  | preflight                                                                                                        | plan (record IdentityBefore, OriginalOtaURL if empty, UptimeBefore) |
 | preflight                              | planned                                            | decision skip                                                                    | succeeded (detail "already at target")                                                                           | notify                                                              |
@@ -1086,7 +1090,7 @@ Resume (process start): non-terminal jobs get `resume`.
 
 | State                             | On resume                                                 |
 | --------------------------------- | --------------------------------------------------------- |
-| scheduled                         | unchanged (9.4b)                                          |
+| scheduled                         | unchanged: no worker; the scheduler looks at its start (9.4b) |
 | queued                            | wait for scheduler                                        |
 | preflight, verify                 | probe_identity                                            |
 | backup                            | backup                                                    |
@@ -1121,15 +1125,57 @@ The path of an update is chosen once, in the preview, which is also the prefligh
 
 ### 9.4b Scheduled start (#603)
 
-An update job can wait for a start time. Package 1 (0.36.0) is the contract only; nothing creates such a job
-yet. Package 2 gives the state its transitions (start, cancel, missed, notification) and lifts the refusal.
+An update job can wait for a start time (0.36.0). The preview chooses it (#604); the engine runs it.
 
 - `model.JobScheduled` (`scheduled`): not terminal; the job waits for `Job.StartAt` and holds no worker and
   no slot (`OTA_PARALLEL`) until then. Like every non-terminal job it holds its device in
-  `ota_jobs_one_active`. Until package 2 it is outside the transition table: `Step` (resume and cancel
-  included) leaves it unchanged.
+  `ota_jobs_one_active`, and ota's `activeStates` include it: another update, Make compliant, a bulk command
+  or backup, a GPIO template and a retry are refused for the device with "has a scheduled update (TX-0010) that
+  starts Sat, Nov 7 at 03:00; cancel it first". The person's own writers (console, power, settings writes,
+  `app/devicelocks.go`) and the firmware recheck (`app/fwrecheck.go`) do not count it: the device stays usable
+  until the start. Restore (`ActiveJobs`) and device delete (the store) are refused while it waits.
 - `Job.StartAt`: when the job may start; zero starts at once (every job made before). Fixed at creation,
   never rewritten by a transition and never copied by a retry (`retryRequest`), which starts at once.
+- `Submit` with `Request.StartAt`: a time that is not after now is refused as a whole before anything is read
+  (`ota.StartInPastError`, `ErrStartInPast`: "Choose a time in the future. It is now Fri, Nov 6 at 10:21.").
+  Otherwise the same checks as for an update that starts at once (preview: probe, policy, select, plan,
+  Guard, path), and the jobs are stored as `scheduled`.
+- The engine (`ota/scheduled.go`): `Run` resumes every non-terminal job except queued and scheduled ones.
+  Whenever the scheduler wakes it first looks at the scheduled jobs (`schedule.At(StartAt, now,
+  schedule.LateStart)`), then starts queued jobs FIFO as before. It wakes through the engine clock at the
+  earliest start or retry, at least once a minute (a timer counts monotonic time, which stands still while the
+  host sleeps; the start follows the wall clock).
+  - **Wait**: nothing.
+  - **Run** (start <= now <= start + 60 min; a start after downtime is late, never early): the device must not
+    be excluded from OTA (else `guard_refused`, failed, nothing sent) and must pass `Options.StartCheck`,
+    wired in `app/ota.go`: the device lock (taken without waiting, as TasmoFleet's own work) and the firmware
+    holds of a typed `Upgrade` (#347), what `lockedOTA.Submit` checks for a person. A refusal is tried again
+    every 30 s inside the window. Then, with the lock held, `scheduled -> queued` is stored (event
+    `start_due`, detail "planned for Thu, Nov 5 at 03:00, started 2s after it") and the lock is released; from
+    then on the active job keeps the writers away. The normal preflight follows: identity, policy, select,
+    plan and Guard run again, and Guard again before every `OtaUrl` and `Upgrade` (safety rule 1). The path
+    (`Job.Transport`, 9.4a) and the delivery stay those of the plan: a push whose plan no longer allows it
+    fails in the preflight as for any job; the path is not chosen again.
+  - **Missed** (now > start + 60 min): the job ends `cancelled` with `NotStarted` (event `not_started`,
+    LastError "TasmoFleet was down at the planned start (Thu, Nov 5 at 03:00) and was not back within 60
+    minutes. It came back at Thu, Nov 5 at 04:12. No device was changed, and this update will not start
+    later."). It never starts later. A job whose device this engine found busy until the end of the window
+    fails instead (`guard_refused`, the reason in LastError): TasmoFleet was running, so "not started because
+    TasmoFleet was down" would be wrong.
+  - `Step` checks the window again for each of these events, so an early or late event never starts the
+    job outside it and a job that may still start is never written off. The start re-reads the job and
+    stores `start_due` (or the end of the job) under the engine lock, as `Cancel` does, so a cancel and a
+    start never both act on it; the start check itself runs without the lock (it must not block), and a
+    cancel during it wins (the re-read sees `cancelled`).
+- `Cancel` and `CancelBatch`: `scheduled -> cancelled` at once (not `NotStarted`); nothing was sent.
+- Notification: when no job of the transaction ran and at least one ended `NotStarted` (the others were
+  cancelled by the person before the start), the job callback sends `update.not_started` (9.4b, 14.5)
+  instead of `update.finished`, counting only the devices that were not started: title "Scheduled update
+  not started", text "TX-0008 (Update to Tasmota 16.1.0, 12 devices) was planned for Thu, Nov 5 at 03:00.
+  TasmoFleet was down and was not back within 60 minutes, so the update was not started and no device was
+  changed. Plan it again to run it." Once, when TasmoFleet is back. It follows `NOTIFY_UPDATE` and is sent
+  under `problems` too.
+- Metric: `tasmofleet_ota_jobs_active` counts jobs at work, not jobs waiting for their start.
 - `Job.NotStarted`: the job ended `cancelled` without starting, because its start had passed by more than
   the late-start window; nothing was sent to the device.
 - Migration 0048 adds `ota_jobs.start_at` (milliseconds, like `deadline_at`; 0 = none) and
@@ -1141,8 +1187,6 @@ yet. Package 2 gives the state its transitions (start, cancel, missed, notificat
   `notify.MissedGrace` is this constant). `schedule.At(start, now, grace)` is pure: `Wait` before `start`, `Run` while
   `now - start <= grace` (the boundary of `schedule.Plan`: 60:00 late runs, 60:01 does not), `Missed`
   after; a zero `start` is `Run`.
-- `ota.Request.StartAt`: until package 2, `Submit` refuses a request with a non-zero `StartAt` as a whole
-  with `ota.ErrStartAtUnsupported`, before it reads a device or creates anything.
 
 ### 9.5 Timeouts and limits (defaults, configurable)
 
@@ -1861,7 +1905,8 @@ hint and Run now.
 
 Package `notify` tells a person about events they did not watch (#249). Events: `update.finished`
 (one per update transaction, sent by the job callback when the last job of the transaction ends; result
-`ok`, `partial`, `failed` or `cancelled`), `backup.scheduled_failed` (one per scheduled run, one line
+`ok`, `partial`, `failed` or `cancelled`), `update.not_started` (a scheduled transaction none of whose jobs
+started, 9.4b; result `not_started`, a problem: also under `problems`, priority as failed), `backup.scheduled_failed` (one per scheduled run, one line
 per failed device with hostname, address and reason, linking to the failed rows of the Backups page), `snapshot.failed` (scheduled database snapshot), and `test`. Settings
 (`NOTIFY_*`, Settings page, tab Notifications) select the events and configure two server-side channels, plus the browser (below):
 
@@ -1869,9 +1914,9 @@ per failed device with hostname, address and reason, linking to the failed rows 
   `json` is the body `{event, result, title, text, url, time}`; `homeassistant` sends the same body
   (its webhook trigger exposes it as `trigger.json`); `ntfy` sends the text as a plain-text body
   with the `Title` header (RFC 2047 encoded when not ASCII, line breaks replaced by spaces),
-  `Click` only when `PUBLIC_URL` gives a link, and `X-Priority` (not `Priority`, which a proxy may use for RFC 9218) 4 for failed or partial results,
-  3 otherwise; `gotify` sends `{title, message, priority}` as JSON (priority 8 for failed or
-  partial, 5 otherwise) with `extras["client::notification"].click.url` when there is a link
+  `Click` only when `PUBLIC_URL` gives a link, and `X-Priority` (not `Priority`, which a proxy may use for RFC 9218) 4 for failed, partial or not started results,
+  3 otherwise; `gotify` sends `{title, message, priority}` as JSON (priority 8 for failed,
+  partial or not started, 5 otherwise) with `extras["client::notification"].click.url` when there is a link
   (the token goes in the secret header `X-Gotify-Key`). An unknown format is refused, not sent as
   JSON. The settings page previews the saved format (request line, headers except the secret
   one, body). Optional secret header. Ten seconds per attempt, one retry on a network error, 5xx or 429, never on 4xx, no proxy

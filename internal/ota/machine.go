@@ -15,11 +15,13 @@ package ota
 
 import (
 	"errors"
+	"fmt"
 	"strings"
 	"time"
 
 	"github.com/hellwand/tasmofleet/internal/fwselect"
 	"github.com/hellwand/tasmofleet/internal/model"
+	"github.com/hellwand/tasmofleet/internal/schedule"
 )
 
 // ErrNotImplemented marks skeleton code.
@@ -44,6 +46,12 @@ const (
 	EvBackupFailed  EventKind = "backup_failed"  // Err filled; fails the job unless SkipBackup
 	EvUpgradeReport EventKind = "upgrade_report" // MQTT stat/<t>/UPGRADE seen (Err = "Failed ..." or "" for Successful); hint only
 	EvCancel        EventKind = "cancel"         // user cancel
+	// EvStartDue: a scheduled job's start has come and the start check passed (Err: how late, for the
+	// event detail); the job is queued and starts like any other (#603).
+	EvStartDue EventKind = "start_due"
+	// EvNotStarted: a scheduled job's start passed by more than the late-start window while TasmoFleet was
+	// not running; the job ends without starting.
+	EvNotStarted EventKind = "not_started"
 )
 
 // Event is the input to Step.
@@ -154,10 +162,13 @@ func Step(j model.Job, ev Event, now time.Time, cfg Config) (model.Job, []Action
 		return resume(j, now, cfg)
 	case EvCancel:
 		return cancel(j, now)
-	case EvStart, EvIdentity, EvPlanned, EvCommandOK, EvCommandFailed, EvGuardRefused, EvProbeOnline, EvProbeOffline, EvTimeout, EvBackupDone, EvBackupFailed, EvUpgradeReport:
+	case EvStart, EvIdentity, EvPlanned, EvCommandOK, EvCommandFailed, EvGuardRefused, EvProbeOnline, EvProbeOffline, EvTimeout, EvBackupDone, EvBackupFailed, EvUpgradeReport,
+		EvStartDue, EvNotStarted:
 		// handled per state below
 	}
 	switch j.State {
+	case model.JobScheduled:
+		return stepScheduled(j, ev, now)
 	case model.JobQueued:
 		return stepQueued(j, ev, now, cfg)
 	case model.JobPreflight:
@@ -178,9 +189,8 @@ func Step(j model.Job, ev Event, now time.Time, cfg Config) (model.Job, []Action
 		return stepVerify(j, ev, now, cfg)
 	case model.JobRestoreOtaURL:
 		return stepRestore(j, ev, now, cfg)
-	case model.JobScheduled, model.JobApplying, model.JobSucceeded, model.JobFailed, model.JobCancelled:
-		// not in the transition table: policy jobs never reach the machine; a scheduled job gets its
-		// transitions with the scheduled start (#603, package 2)
+	case model.JobApplying, model.JobSucceeded, model.JobFailed, model.JobCancelled:
+		// not in the transition table: policy jobs never reach the machine
 	}
 	return j, nil
 }
@@ -272,12 +282,12 @@ func resume(j model.Job, now time.Time, cfg Config) (model.Job, []Action) {
 	case model.JobScheduled, model.JobQueued, model.JobApplying, model.JobSucceeded, model.JobFailed, model.JobCancelled:
 		// not in the transition table: the job stays unchanged
 	}
-	return j, nil // queued: the scheduler sends start
+	return j, nil // queued: the scheduler sends start; scheduled: the engine's start check sends start_due
 }
 
 func cancel(j model.Job, now time.Time) (model.Job, []Action) {
 	switch j.State {
-	case model.JobQueued, model.JobPreflight, model.JobBackup, model.JobSetOtaURL:
+	case model.JobScheduled, model.JobQueued, model.JobPreflight, model.JobBackup, model.JobSetOtaURL:
 		j = to(j, model.JobCancelled, now)
 		return j, notify()
 	case model.JobSafebootSwitch, model.JobSafebootRecover, model.JobUpgradeIssued, model.JobAwaitReboot, model.JobVerify:
@@ -286,10 +296,50 @@ func cancel(j model.Job, now time.Time) (model.Job, []Action) {
 		j.CancelRequested = true
 		j.UpdatedAt = now
 		return j, nil
-	case model.JobScheduled, model.JobRestoreOtaURL, model.JobApplying, model.JobSucceeded, model.JobFailed, model.JobCancelled:
+	case model.JobRestoreOtaURL, model.JobApplying, model.JobSucceeded, model.JobFailed, model.JobCancelled:
 		// not in the transition table: the job stays unchanged
 	}
 	return j, nil
+}
+
+// stepScheduled moves a job that waits for its start time (#603). The engine sends start_due when the start
+// has come and the device passed the start check, not_started when the start passed by more than the window
+// while TasmoFleet was down, and guard_refused when the start is refused for good. The window is checked here
+// again for every one of them: an early or late event never starts the job outside it, and a job that may
+// still start is never written off. start_due only queues the job; every check of the preflight follows.
+func stepScheduled(j model.Job, ev Event, now time.Time) (model.Job, []Action) {
+	due := schedule.At(j.StartAt, now, schedule.LateStart)
+	switch ev.Kind {
+	case EvStartDue:
+		if due == schedule.Run {
+			return to(j, model.JobQueued, now), nil
+		}
+	case EvNotStarted:
+		if due == schedule.Missed {
+			j = to(j, model.JobCancelled, now)
+			j.NotStarted = true
+			j.LastError = NotStartedText(j.StartAt, now)
+			return j, notify()
+		}
+	case EvGuardRefused:
+		if due != schedule.Wait {
+			return fail(j, now, ev.Err)
+		}
+	case EvStart, EvResume, EvIdentity, EvPlanned, EvCommandOK, EvCommandFailed, EvProbeOnline, EvProbeOffline, EvTimeout, EvBackupDone, EvBackupFailed, EvUpgradeReport, EvCancel:
+		// start in particular: a scheduled job never gets a worker before start_due
+	}
+	return j, nil
+}
+
+// WhenText is how a start time reads in texts: "Thu, Nov 5 at 03:00", on the server's clock (TZ) like every
+// other time of the app. The store reads times back in UTC, so the zone is set here, not left to the caller.
+func WhenText(t time.Time) string { return t.Local().Format("Mon, Jan 2 at 15:04") }
+
+// NotStartedText is the LastError of a job that was not started (the mockup's words, #604): TasmoFleet was
+// down at start and back at now, later than the window allows.
+func NotStartedText(start, now time.Time) string {
+	return fmt.Sprintf("TasmoFleet was down at the planned start (%s) and was not back within %d minutes. It came back at %s. "+
+		"No device was changed, and this update will not start later.", WhenText(start), int(schedule.LateStart/time.Minute), WhenText(now))
 }
 
 func stepQueued(j model.Job, ev Event, now time.Time, cfg Config) (model.Job, []Action) {
@@ -337,7 +387,7 @@ func stepPreflight(j model.Job, ev Event, now time.Time, cfg Config) (model.Job,
 		return fail(j, now, withErr("preflight failed", ev.Err))
 	case EvTimeout:
 		return fail(j, now, "preflight timed out")
-	case EvStart, EvResume, EvCommandOK, EvProbeOnline, EvProbeOffline, EvBackupDone, EvBackupFailed, EvUpgradeReport, EvCancel:
+	case EvStart, EvResume, EvCommandOK, EvProbeOnline, EvProbeOffline, EvBackupDone, EvBackupFailed, EvUpgradeReport, EvCancel, EvStartDue, EvNotStarted:
 		// not in the transition table: the job stays unchanged
 	}
 	return j, nil
@@ -349,7 +399,7 @@ func stepBackup(j model.Job, ev Event, now time.Time, cfg Config) (model.Job, []
 		return toSetOtaURL(j, now, cfg)
 	case EvBackupFailed:
 		return fail(j, now, withErr("backup failed", ev.Err))
-	case EvStart, EvResume, EvIdentity, EvPlanned, EvCommandOK, EvCommandFailed, EvGuardRefused, EvProbeOnline, EvProbeOffline, EvTimeout, EvUpgradeReport, EvCancel:
+	case EvStart, EvResume, EvIdentity, EvPlanned, EvCommandOK, EvCommandFailed, EvGuardRefused, EvProbeOnline, EvProbeOffline, EvTimeout, EvUpgradeReport, EvCancel, EvStartDue, EvNotStarted:
 		// not in the transition table: the job stays unchanged
 	}
 	return j, nil
@@ -376,7 +426,7 @@ func stepSetOtaURL(j model.Job, ev Event, now time.Time, cfg Config) (model.Job,
 		return fail(j, now, "OtaUrl timed out")
 	case EvGuardRefused:
 		return fail(j, now, withErr("guard refused", ev.Err))
-	case EvStart, EvResume, EvIdentity, EvPlanned, EvProbeOnline, EvProbeOffline, EvBackupDone, EvBackupFailed, EvUpgradeReport, EvCancel:
+	case EvStart, EvResume, EvIdentity, EvPlanned, EvProbeOnline, EvProbeOffline, EvBackupDone, EvBackupFailed, EvUpgradeReport, EvCancel, EvStartDue, EvNotStarted:
 		// not in the transition table: the job stays unchanged
 	}
 	return j, nil
@@ -457,7 +507,7 @@ func stepUpgradeIssued(j model.Job, ev Event, now time.Time, cfg Config) (model.
 		}
 		// Upgrade was not sent.
 		return fail(j, now, withErr("guard refused", ev.Err))
-	case EvStart, EvResume, EvIdentity, EvPlanned, EvBackupDone, EvBackupFailed, EvCancel:
+	case EvStart, EvResume, EvIdentity, EvPlanned, EvBackupDone, EvBackupFailed, EvCancel, EvStartDue, EvNotStarted:
 		// not in the transition table: the job stays unchanged
 	}
 	return j, nil
@@ -533,7 +583,7 @@ func stepAwaitReboot(j model.Job, ev Event, now time.Time, cfg Config) (model.Jo
 			return retry(j, now, cfg, ErrTextNoEffect)
 		}
 		return failNotBack(j, now, ErrTextNotBack, ev.Addr)
-	case EvStart, EvResume, EvIdentity, EvPlanned, EvCommandOK, EvCommandFailed, EvGuardRefused, EvBackupDone, EvBackupFailed, EvUpgradeReport, EvCancel:
+	case EvStart, EvResume, EvIdentity, EvPlanned, EvCommandOK, EvCommandFailed, EvGuardRefused, EvBackupDone, EvBackupFailed, EvUpgradeReport, EvCancel, EvStartDue, EvNotStarted:
 		// not in the transition table: the job stays unchanged
 	}
 	return j, nil
@@ -586,7 +636,7 @@ func stepVerify(j model.Job, ev Event, now time.Time, cfg Config) (model.Job, []
 		return j, probeLater(cfg)
 	case EvIdentity:
 		// decided below
-	case EvStart, EvResume, EvPlanned, EvCommandOK, EvGuardRefused, EvProbeOnline, EvProbeOffline, EvBackupDone, EvBackupFailed, EvUpgradeReport, EvCancel:
+	case EvStart, EvResume, EvPlanned, EvCommandOK, EvGuardRefused, EvProbeOnline, EvProbeOffline, EvBackupDone, EvBackupFailed, EvUpgradeReport, EvCancel, EvStartDue, EvNotStarted:
 		return j, nil // not in the transition table: the job stays unchanged
 	}
 	id := ev.Identity
@@ -692,7 +742,7 @@ func stepRestore(j model.Job, ev Event, now time.Time, cfg Config) (model.Job, [
 	case EvCommandFailed, EvTimeout:
 		j.LastError = withErr(ErrTextRestoreFailed, ev.Err)
 		return afterOtaURL(j, now)
-	case EvStart, EvResume, EvIdentity, EvPlanned, EvGuardRefused, EvProbeOnline, EvProbeOffline, EvBackupDone, EvBackupFailed, EvUpgradeReport, EvCancel:
+	case EvStart, EvResume, EvIdentity, EvPlanned, EvGuardRefused, EvProbeOnline, EvProbeOffline, EvBackupDone, EvBackupFailed, EvUpgradeReport, EvCancel, EvStartDue, EvNotStarted:
 		// not in the transition table: the job stays unchanged
 	}
 	return j, nil

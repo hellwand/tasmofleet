@@ -33,6 +33,9 @@ type deviceGuard struct {
 	tryOnly bool
 }
 
+// activeStates are the job states that keep the person's writers (console, power, settings) off a device. A
+// scheduled job is not among them: the device stays usable until the update starts (#603), and the start
+// check (startCheck) takes the device lock first.
 var activeStates = []model.JobState{
 	model.JobQueued, model.JobPreflight, model.JobBackup, model.JobSetOtaURL, model.JobSafebootSwitch, model.JobSafebootRecover, model.JobUpgradeIssued,
 	model.JobAwaitReboot, model.JobVerify, model.JobRestoreOtaURL, model.JobApplying,
@@ -244,6 +247,23 @@ func (l lockedOTA) Submit(ctx context.Context, actor string, reqs []ota.Request)
 		return 0, err // like any refusal, all or nothing: the person sees which device and why
 	}
 	return l.OTA.Submit(ctx, actor, reqs)
+}
+
+// startCheck is ota.Options.StartCheck (#603): at the start of a scheduled update it checks what Submit
+// checks for a person, the device lock and the firmware holds. It never waits for the lock (TasmoFleet starts
+// this on its own, #670; the engine tries again within the window). On success the lock stays held until the
+// engine calls the release, after it stored the job as queued: from then on the active job keeps the others away.
+func (g deviceGuard) startCheck(ctx context.Context, id model.DeviceID) (func(), error) {
+	g.tryOnly = true
+	release, holder, ok := g.acquire(ctx, id, "ota")
+	if !ok {
+		return nil, devlock.BusyError{Holder: holder}
+	}
+	if reason, held := g.heldReasons([]model.DeviceID{id})[id]; held { // what refuseHeld refuses, as one sentence
+		release()
+		return nil, errors.New(reason)
+	}
+	return release, nil
 }
 
 // SubmitRetry takes the locks of the devices that would be retried (the

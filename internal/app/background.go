@@ -85,7 +85,13 @@ func (a *runtime) updateMetrics(ctx context.Context) {
 		std.FirmwareCache.With().Set(float64(dirSize(filepath.Join(a.cfg.DataDir, "firmware"))))
 	}
 	if jobs, err := a.svc.Store.ActiveJobs(ctx); err == nil {
-		std.OTAJobsActive.With().Set(float64(len(jobs)))
+		atWork := 0
+		for _, j := range jobs {
+			if j.State != model.JobScheduled { // waiting for its start time (#603): no work yet
+				atWork++
+			}
+		}
+		std.OTAJobsActive.With().Set(float64(atWork))
 	}
 }
 

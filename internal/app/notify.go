@@ -31,7 +31,9 @@ func (a *runtime) publishNotice(ev notify.Event) {
 }
 
 // notifyBatchDone sends the "update finished" event when j was the last unfinished job of its
-// transaction: one message per transaction, not per device. Policy, command and backup jobs are
+// transaction: one message per transaction, not per device. A transaction none of whose jobs started
+// (TasmoFleet was down past the window of its scheduled start, #603) sends "scheduled update not started"
+// instead. Policy, command and backup jobs are
 // no update. The transaction number is remembered, so two jobs that end at the same moment (both
 // see the batch finished) send one message.
 func (a *runtime) notifyBatchDone(j model.Job) {
@@ -45,11 +47,14 @@ func (a *runtime) notifyBatchDone(j model.Job) {
 		a.log.Warn("notification: list the jobs of the transaction", "batch", j.BatchID, "err", err)
 		return
 	}
-	var ok, failed, cancelled int
+	var ok, failed, cancelled, notStarted int
 	target := ""
 	for _, x := range jobs {
 		if !x.State.Terminal() {
 			return // still running or waiting: the last job to end sends it
+		}
+		if x.NotStarted {
+			notStarted++
 		}
 		if x.State == model.JobSucceeded {
 			ok++
@@ -71,6 +76,13 @@ func (a *runtime) notifyBatchDone(j model.Job) {
 	}
 	// The number only has to outlive the moment two jobs of one transaction end together.
 	time.AfterFunc(10*time.Minute, func() { a.notifiedBatches.Delete(j.BatchID) })
+	if notStarted > 0 && ok == 0 && failed == 0 {
+		// TasmoFleet was down at the planned start and too long (#603), and no job ran: every job ended
+		// cancelled, some of them perhaps by the person before the start. Say so, counting only the devices
+		// that were not started.
+		a.notifier.Emit(notify.UpdateNotStarted(a.notifier.Config(), int64(j.BatchID), notStarted, target, j.StartAt, time.Now()))
+		return
+	}
 	a.notifier.Emit(notify.UpdateFinished(a.notifier.Config(), int64(j.BatchID), ok, failed, cancelled, target, time.Now()))
 }
 

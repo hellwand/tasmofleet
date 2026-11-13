@@ -923,12 +923,13 @@ func TestStepResume(t *testing.T) {
 var (
 	allStates = []model.JobState{
 		model.JobScheduled, model.JobQueued, model.JobPreflight, model.JobBackup, model.JobSetOtaURL, model.JobUpgradeIssued,
-		model.JobAwaitReboot, model.JobVerify, model.JobRestoreOtaURL,
+		model.JobAwaitReboot, model.JobVerify, model.JobRestoreOtaURL, model.JobApplying,
 		model.JobSucceeded, model.JobFailed, model.JobCancelled,
 	}
 	allEvents = []EventKind{
 		EvStart, EvResume, EvIdentity, EvPlanned, EvCommandOK, EvCommandFailed, EvGuardRefused,
 		EvProbeOnline, EvProbeOffline, EvTimeout, EvBackupDone, EvBackupFailed, EvUpgradeReport, EvCancel,
+		EvStartDue, EvNotStarted,
 	}
 )
 
@@ -948,6 +949,9 @@ var handled = map[model.JobState][]EventKind{
 func isHandled(s model.JobState, k EventKind) bool {
 	if k == EvResume || k == EvCancel {
 		return true
+	}
+	if s == model.JobScheduled {
+		return true // TestStepScheduled covers every event of a scheduled job
 	}
 	for _, h := range handled[s] {
 		if h == k {
@@ -995,18 +999,86 @@ func TestStepUnknownPairsLeaveJobUnchanged(t *testing.T) {
 	}
 }
 
-// A scheduled job waits for its start time and must not touch its device before it (#603). Until it
-// gets transitions of its own (package 2 of #603), no event moves it: resume after a restart of
-// TasmoFleet must not probe or send anything. The unknown-pairs test above skips these two events.
-func TestStepScheduledJobIgnoresResumeAndCancel(t *testing.T) {
-	for _, k := range []EventKind{EvResume, EvCancel} {
-		in := job(model.JobScheduled, model.StageFinal)
-		in.StartAt = t0.Add(time.Hour)
-		got, as := Step(in, fullEvent(k), t0, testCfg())
-		if !reflect.DeepEqual(got, in) || len(as) != 0 {
-			t.Errorf("scheduled/%s changed the job to %s or produced actions %v", k, got.State, kinds(as))
+// A scheduled job waits for its start time and must not touch its device before it (#603): resume after a
+// restart of TasmoFleet must not probe or send anything, it only goes on waiting. The unknown-pairs test
+// above skips resume; the scheduled events have their own test below.
+func TestStepScheduledJobIgnoresResume(t *testing.T) {
+	in := job(model.JobScheduled, model.StageFinal)
+	in.StartAt = t0.Add(-time.Minute) // even when its time has come: only the engine's start check starts it
+	got, as := Step(in, fullEvent(EvResume), t0, testCfg())
+	if !reflect.DeepEqual(got, in) || len(as) != 0 {
+		t.Errorf("scheduled/resume changed the job to %s or produced actions %v", got.State, kinds(as))
+	}
+}
+
+// Why (#603): the window is the promise the preview makes ("starts as soon as TasmoFleet is back, but only
+// until 04:00"). The machine checks it again for every event of a scheduled job, so an event that comes too
+// early or too late (a slow engine, a clock that jumped) can never start an update outside it, and a job
+// that may still start is never written off as not started. start_due only queues the job: every check of
+// the preflight (identity, Guard, plan) runs after it, as for a job that starts at once.
+func TestStepScheduled(t *testing.T) {
+	start := t0.Add(-time.Hour) // t0 is "now" in every row
+	at := func(s time.Time) model.Job {
+		j := job(model.JobScheduled, model.StageFinal)
+		j.Plan, j.Attempt, j.TargetArtifact, j.MinimalArtifact, j.IdentityBefore, j.OriginalOtaURL, j.UptimeBefore = "", 0, 0, 0, model.Identity{}, "", 0
+		j.StartAt = s
+		return j
+	}
+	unchanged := func(in model.Job) func(*testing.T, model.Job, []Action) {
+		return func(t *testing.T, j model.Job, as []Action) {
+			if !reflect.DeepEqual(j, in) || len(as) != 0 {
+				t.Fatalf("got %s %+v with actions %v, want the job unchanged", j.State, j, kinds(as))
+			}
 		}
 	}
+	early, late59, late60, late61 := at(t0.Add(time.Second)), at(t0.Add(-59*time.Minute)), at(start), at(start.Add(-time.Minute))
+	rows := []row{
+		{name: "scheduled/start_due/before the start", in: early, ev: Event{Kind: EvStartDue}, state: model.JobScheduled, check: unchanged(early)},
+		{name: "scheduled/start_due/59 min late", in: late59, ev: Event{Kind: EvStartDue}, state: model.JobQueued,
+			check: func(t *testing.T, j model.Job, _ []Action) {
+				if j.UpdatedAt != t0 || j.NotStarted || j.LastError != "" || !j.StartAt.Equal(late59.StartAt) {
+					t.Fatalf("queued job %+v: want only the state and UpdatedAt changed", j)
+				}
+			}},
+		{name: "scheduled/start_due/60 min late still starts", in: late60, ev: Event{Kind: EvStartDue}, state: model.JobQueued},
+		{name: "scheduled/start_due/61 min late never starts", in: late61, ev: Event{Kind: EvStartDue}, state: model.JobScheduled, check: unchanged(late61)},
+		{name: "scheduled/not_started/inside the window", in: late60, ev: Event{Kind: EvNotStarted}, state: model.JobScheduled, check: unchanged(late60)},
+		{name: "scheduled/not_started/before the start", in: early, ev: Event{Kind: EvNotStarted}, state: model.JobScheduled, check: unchanged(early)},
+		{name: "scheduled/not_started/61 min late", in: late61, ev: Event{Kind: EvNotStarted}, state: model.JobCancelled, actions: []ActionKind{ActNotify},
+			check: func(t *testing.T, j model.Job, _ []Action) {
+				want := "TasmoFleet was down at the planned start (" + late61.StartAt.Local().Format("Mon, Jan 2 at 15:04") +
+					") and was not back within 60 minutes. It came back at " + t0.Local().Format("Mon, Jan 2 at 15:04") +
+					". No device was changed, and this update will not start later."
+				if !j.NotStarted || j.LastError != want {
+					t.Fatalf("not started %v, LastError %q; want true and %q", j.NotStarted, j.LastError, want)
+				}
+			}},
+		{name: "scheduled/guard_refused/before the start", in: early, ev: Event{Kind: EvGuardRefused, Err: "excluded"}, state: model.JobScheduled, check: unchanged(early)},
+		{name: "scheduled/guard_refused/inside the window", in: late59, ev: Event{Kind: EvGuardRefused, Err: "excluded from OTA"}, state: model.JobFailed, actions: []ActionKind{ActNotify},
+			check: func(t *testing.T, j model.Job, _ []Action) {
+				if j.LastError != "excluded from OTA" || j.NotStarted {
+					t.Fatalf("LastError %q, not started %v; want the refusal and false", j.LastError, j.NotStarted)
+				}
+			}},
+		{name: "scheduled/guard_refused/after the window", in: late61, ev: Event{Kind: EvGuardRefused, Err: "busy"}, state: model.JobFailed, actions: []ActionKind{ActNotify}},
+		{name: "scheduled/cancel", in: early, ev: Event{Kind: EvCancel}, state: model.JobCancelled, actions: []ActionKind{ActNotify},
+			check: func(t *testing.T, j model.Job, _ []Action) {
+				if j.NotStarted || j.CancelRequested {
+					t.Fatalf("cancelled scheduled job %+v: a person's cancel is no missed start and waits for nothing", j)
+				}
+			}},
+	}
+	for _, k := range allEvents {
+		switch k {
+		case EvStartDue, EvNotStarted, EvGuardRefused, EvCancel, EvResume:
+			continue
+		case EvStart, EvIdentity, EvPlanned, EvCommandOK, EvCommandFailed, EvProbeOnline, EvProbeOffline, EvTimeout, EvBackupDone, EvBackupFailed, EvUpgradeReport:
+		}
+		// EvStart in particular: a scheduled job never gets a worker, and if one sent it start anyway the job
+		// would skip the window and the start check.
+		rows = append(rows, row{name: "scheduled/" + string(k), in: late59, ev: fullEvent(k), state: model.JobScheduled, check: unchanged(late59)})
+	}
+	runRows(t, rows)
 }
 
 // Terminal states absorb everything, including resume and cancel: a
@@ -1161,4 +1233,14 @@ func TestStepUpgradeIssuedPush(t *testing.T) {
 			},
 		},
 	})
+}
+
+// Why: the store reads every time back in UTC, but the person planned "03:00" on the server's clock and every
+// other time of the app reads on it. A start time in a text (refusal, not started, start detail) must read
+// 03:00 for a 03:00 plan, not the UTC hour. (Where TZ is UTC both are the same and this cannot fail.)
+func TestWhenTextReadsOnTheServersClock(t *testing.T) {
+	planned := time.Date(2026, 11, 5, 3, 0, 0, 0, time.Local)
+	if got := WhenText(planned.UTC()); got != "Thu, Nov 5 at 03:00" {
+		t.Fatalf("WhenText of a 03:00 plan read back as UTC = %q, want \"Thu, Nov 5 at 03:00\"", got)
+	}
 }

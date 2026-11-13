@@ -198,3 +198,80 @@ func TestBrowserNoticesReachTheHubWithUniqueIDs(t *testing.T) {
 	case <-time.After(100 * time.Millisecond):
 	}
 }
+
+// Why (#603): a scheduled transaction that was not started because TasmoFleet was down sends one message
+// that says so ("Scheduled update not started"), not an "update finished" that reads like a cancel by the
+// person, and also under "only problems": something the person planned did not happen, and nobody sees it
+// otherwise. A device the person cancelled before the start does not change that (the rest still did not
+// run), and the message counts only the devices that were not started. A transaction where a device did
+// run stays a normal "update finished".
+func TestNotStartedTransactionSendsOneNotStartedMessage(t *testing.T) {
+	type end struct {
+		state      model.JobState
+		notStarted bool
+	}
+	missed := end{model.JobCancelled, true}
+	for _, tc := range []struct {
+		name string
+		when string
+		ends []end
+		want []string
+		not  []string
+	}{
+		{"all not started", "problems", []end{missed, missed}, []string{`"event":"update.not_started"`, `"result":"not_started"`,
+			`"title":"Scheduled update not started"`, `(Update to Tasmota 16.1.0, 2 devices) was planned for`, "Thu, Nov 5 at 03:00"}, nil},
+		{"one cancelled by the person before the start", "problems", []end{missed, {model.JobCancelled, false}},
+			[]string{`"event":"update.not_started"`, `(Update to Tasmota 16.1.0, 1 device) was planned for`, "Thu, Nov 5 at 03:00"}, nil},
+		{"one device ran", "any", []end{missed, {model.JobSucceeded, false}},
+			[]string{`"event":"update.finished"`}, []string{`not_started`}},
+		{"one device failed", "any", []end{missed, {model.JobFailed, false}},
+			[]string{`"event":"update.finished"`}, []string{`not_started`}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			a, svc, sent := notifyRuntime(t, map[string]string{"NOTIFY_UPDATE_WHEN": tc.when})
+			ctx := t.Context()
+			start := time.Date(2026, 11, 5, 3, 0, 0, 0, time.Local)
+			var jobs []model.Job
+			for i := range tc.ends {
+				d, err := svc.Store.CreateDevice(ctx, model.Device{Name: "d" + strconv.Itoa(i), Address: "192.0.2." + strconv.Itoa(i+1)})
+				if err != nil {
+					t.Fatal(err)
+				}
+				jobs = append(jobs, model.Job{DeviceID: d, State: model.JobScheduled, StartAt: start, Stage: model.StageFinal, Policy: model.PolicyOnlyNewer, TargetRelease: "16.1.0"})
+			}
+			batch, ids, err := svc.Store.CreateBatch(ctx, "u", jobs)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var last model.Job
+			for i, e := range tc.ends {
+				j := jobs[i]
+				j.ID, j.BatchID, j.State, j.NotStarted = ids[i], batch, e.state, e.notStarted
+				if err := svc.Store.SaveTransition(ctx, j, model.JobEvent{JobID: ids[i], From: model.JobScheduled, To: e.state, Event: "test"}); err != nil {
+					t.Fatal(err)
+				}
+				stored, err := svc.Store.GetJob(ctx, ids[i]) // as the engine's callback gets it: StartAt read back from the store
+				if err != nil {
+					t.Fatal(err)
+				}
+				last = stored
+			}
+			a.notifyBatchDone(last)
+			a.notifyBatchDone(last)
+			got := sent()
+			if len(got) != 1 {
+				t.Fatalf("sent %d messages, want exactly one: %v", len(got), got)
+			}
+			for _, want := range tc.want {
+				if !strings.Contains(got[0], want) {
+					t.Errorf("body lacks %s: %s", want, got[0])
+				}
+			}
+			for _, not := range tc.not {
+				if strings.Contains(got[0], not) {
+					t.Errorf("body has %s: %s", not, got[0])
+				}
+			}
+		})
+	}
+}

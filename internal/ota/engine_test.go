@@ -993,23 +993,53 @@ func TestSubmitRefuses(t *testing.T) {
 
 func withExcluded(d model.Device) model.Device { d.OTAExcluded = true; return d }
 
-// Why (#603): until the engine can wait for a start time, a request with one must be refused as a whole,
-// before anything is read or sent. Accepting it would store a job that starts at once (in the day) instead
-// of at the time the person chose, or one that never starts.
-func TestSubmitRefusesAStartTimeUntilScheduledStartsExist(t *testing.T) {
-	h := newHarness(t, 2, plugDevice(), plugDevice())
-	_, err := h.e.Submit(context.Background(), "alice", []Request{
-		{DeviceID: 1, Release: "16.0.0"},
-		{DeviceID: 2, Release: "16.0.0", StartAt: t0.Add(time.Hour)},
-	})
-	if !errors.Is(err, ErrStartAtUnsupported) {
-		t.Fatalf("err = %v, want ErrStartAtUnsupported", err)
+// Why (#603): a request with a start time stores the jobs as scheduled, after the same checks as an update
+// that starts at once, and sends nothing that changes a device. A start time that is not ahead of now is
+// refused as a whole, before anything is read or created, with the sentence the preview shows: accepting it
+// would start the update in the day instead of at the time the person chose.
+func TestSubmitWithAStartTimeSchedulesTheJobs(t *testing.T) {
+	h := newHarness(t, 2, plugDevice(), plugDevice(), plugDevice())
+	h.st.devices[3] = withExcluded(h.st.devices[3])
+	for _, at := range []time.Time{t0, t0.Add(-time.Minute)} {
+		_, err := h.e.Submit(context.Background(), "alice", []Request{
+			{DeviceID: 1, Release: "16.0.0"},
+			{DeviceID: 2, Release: "16.0.0", StartAt: at},
+		})
+		var past *StartInPastError
+		if !errors.As(err, &past) || !errors.Is(err, ErrStartInPast) {
+			t.Fatalf("start %v: err = %v, want a StartInPastError", at, err)
+		}
+		if want := "Choose a time in the future. It is now " + WhenText(t0) + "."; err.Error() != want {
+			t.Fatalf("refusal %q, want %q", err.Error(), want)
+		}
 	}
-	if h.st.batches != 0 {
-		t.Fatal("a batch was created for a request with a start time")
+	if h.st.batches != 0 || len(h.rec.entries()) != 0 {
+		t.Fatalf("a refused start time created %d batches or reached the devices: %v", h.st.batches, h.rec.entries())
 	}
-	if log := h.rec.entries(); len(log) != 0 {
-		t.Fatalf("the refused request reached the devices or the store: %v", log)
+
+	start := t0.Add(time.Hour)
+	_, err := h.e.Submit(context.Background(), "alice", []Request{{DeviceID: 3, Release: "16.0.0", StartAt: start}})
+	var ref *RefusedError
+	if !errors.As(err, &ref) || len(ref.Refused) != 1 || !strings.Contains(ref.Refused[0].Reason, "excluded") {
+		t.Fatalf("an excluded device with a start time: err = %v, want the same refusal as without one", err)
+	}
+
+	if _, err := h.e.Submit(context.Background(), "alice", []Request{
+		{DeviceID: 1, Release: "16.0.0", StartAt: start},
+		{DeviceID: 2, Release: "16.0.0", StartAt: start},
+	}); err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+	for _, id := range []model.DeviceID{1, 2} {
+		jobs, _ := h.st.ListJobs(context.Background(), store.JobFilter{DeviceID: id})
+		if len(jobs) != 1 || jobs[0].State != model.JobScheduled || !jobs[0].StartAt.Equal(start) {
+			t.Fatalf("device %d: jobs %+v, want one scheduled job starting %v", id, jobs, start)
+		}
+	}
+	for _, e := range h.rec.entries() {
+		if f := strings.Fields(e)[0]; f != "probe_identity" && f != "guard" {
+			t.Fatalf("planning a scheduled update did %q; only the read-only preview may run before the start", e)
+		}
 	}
 }
 

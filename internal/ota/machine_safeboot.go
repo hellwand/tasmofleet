@@ -84,7 +84,7 @@ func stepSafebootSwitch(j model.Job, ev Event, now time.Time, cfg Config) (model
 		// Never seen as safeboot: it may still be switching, or never did. The switch back is
 		// harmless on a device that runs the app.
 		return toSafebootRecover(j, now, cfg, "the device did not answer as safeboot in time", ev.Addr)
-	case EvStart, EvResume, EvIdentity, EvPlanned, EvBackupDone, EvBackupFailed, EvUpgradeReport, EvCancel:
+	case EvStart, EvResume, EvIdentity, EvPlanned, EvBackupDone, EvBackupFailed, EvUpgradeReport, EvCancel, EvStartDue, EvNotStarted:
 		// not in the transition table: the job stays unchanged
 	}
 	return j, nil
@@ -160,7 +160,7 @@ func stepSafebootRecover(j model.Job, ev Event, now time.Time, cfg Config) (mode
 			return endRecovery(fail(j, now, manualSafeboot(j.LastError, ev.Addr)))
 		}
 		return endRecovery(fail(j, now, unknownSafeboot(j.LastError, ev.Addr, "the device did not answer")))
-	case EvStart, EvResume, EvIdentity, EvPlanned, EvGuardRefused, EvBackupDone, EvBackupFailed, EvUpgradeReport, EvCancel:
+	case EvStart, EvResume, EvIdentity, EvPlanned, EvGuardRefused, EvBackupDone, EvBackupFailed, EvUpgradeReport, EvCancel, EvStartDue, EvNotStarted:
 		// not in the transition table: the job stays unchanged
 	}
 	return j, nil

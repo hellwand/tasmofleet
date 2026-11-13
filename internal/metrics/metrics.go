@@ -255,7 +255,7 @@ type Standard struct {
 func NewStandard(r *Registry, version string, decoder bool) *Standard {
 	s := &Standard{
 		Devices:       r.Gauge("tasmofleet_devices", "Devices by health state.", "health"),
-		OTAJobsActive: r.Gauge("tasmofleet_ota_jobs_active", "OTA jobs currently in a non-terminal state."),
+		OTAJobsActive: r.Gauge("tasmofleet_ota_jobs_active", "OTA jobs at work (not waiting for a scheduled start)."),
 		OTAJobsTotal:  r.Counter("tasmofleet_ota_jobs_total", "Finished OTA jobs by result.", "result"),
 		FirmwareCache: r.Gauge("tasmofleet_firmware_cache_bytes", "Size of the firmware cache on disk."),
 		FirmwareIndexAge: r.Gauge("tasmofleet_firmware_index_age_seconds",

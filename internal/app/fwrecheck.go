@@ -109,7 +109,8 @@ func (r *fwRecheck) tick(ctx context.Context) {
 	}
 }
 
-// activeJobStates are the states of a job that is working on its device (ota's activeStates).
+// activeJobStates are the states of a job that is working on its device (ota's activeStates without
+// scheduled: a job waiting for its start does not touch the device yet, #603).
 var activeJobStates = []model.JobState{
 	model.JobQueued, model.JobPreflight, model.JobBackup, model.JobSetOtaURL,
 	model.JobSafebootSwitch, model.JobSafebootRecover,

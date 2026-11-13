@@ -3,6 +3,8 @@ package app
 import (
 	"context"
 	"reflect"
+	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -97,5 +99,36 @@ func TestBackupSamplesUseTheDevicesOwnNewestRun(t *testing.T) {
 	want := []metrics.BackupSample{{ID: 1, Name: "replaced", Taken: t1}, {ID: 2, Name: "plain", Taken: t2}}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("samples = %+v\nwant     %+v", got, want)
+	}
+}
+
+// Why (#603): tasmofleet_ota_jobs_active is what an alert on "updates at work" reads. A job that waits for
+// its scheduled start (maybe for days) does nothing yet; counting it would show work where there is none.
+func TestOTAJobsActiveLeavesOutScheduledJobs(t *testing.T) {
+	svc := importServices(t)
+	ctx := t.Context()
+	var jobs []model.Job
+	for i, s := range []model.JobState{model.JobScheduled, model.JobQueued, model.JobPreflight} {
+		d, err := svc.Store.CreateDevice(ctx, model.Device{Name: "d" + strconv.Itoa(i), Address: "192.0.2." + strconv.Itoa(i+1)})
+		if err != nil {
+			t.Fatal(err)
+		}
+		j := model.Job{DeviceID: d, State: s, Stage: model.StageFinal, Policy: model.PolicyOnlyNewer, TargetRelease: "16.1.0"}
+		if s == model.JobScheduled {
+			j.StartAt = time.Now().Add(time.Hour)
+		}
+		jobs = append(jobs, j)
+	}
+	if _, _, err := svc.Store.CreateBatch(ctx, "u", jobs); err != nil {
+		t.Fatal(err)
+	}
+	bm, err := backup.New(backup.Options{DataDir: t.TempDir(), Devices: svc.Store, Store: svc.Store, Client: svc.Client, Log: svc.Log})
+	if err != nil {
+		t.Fatal(err)
+	}
+	a := &runtime{svc: svc, cfg: svc.Cfg, log: svc.Log, tracker: health.New(health.Deps{}, health.Options{}), backups: bm}
+	a.updateMetrics(ctx)
+	if got := scrape(svc.Metrics); !strings.Contains(got, "\ntasmofleet_ota_jobs_active 2\n") {
+		t.Fatalf("want 2 jobs at work (queued and preflight, not the scheduled one):\n%s", got)
 	}
 }

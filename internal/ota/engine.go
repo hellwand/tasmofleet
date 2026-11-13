@@ -98,6 +98,11 @@ type Options struct {
 	// releases the device, so the caller must keep new updates away from it, as it does after a typed
 	// firmware command (#347). It runs before the job is released and must not block. nil = no hold.
 	HoldFlashing func(model.DeviceID)
+	// StartCheck runs when the start of a scheduled job has come, before the job is queued (#603): the checks
+	// a person's Submit makes in the application (the device lock, a firmware typed in the console that is
+	// still being flashed). It returns a release, called once the queued state is stored, or why the device
+	// cannot start now; the engine tries again within the late-start window. It must not block. nil = none.
+	StartCheck func(ctx context.Context, id model.DeviceID) (release func(), err error)
 }
 
 // Errors returned by Submit and Cancel.
@@ -114,10 +119,19 @@ var (
 	// commands runs to its end; stopping it halfway would leave the device
 	// with some settings changed and not saved.
 	ErrNotCancellable = errors.New("ota: job cannot be cancelled now")
-	// ErrStartAtUnsupported: a Request carried a start time, which the engine does not run yet (#603,
-	// package 2); nothing is created.
-	ErrStartAtUnsupported = errors.New("ota: a scheduled start is not supported yet")
+	// ErrStartInPast: a Request carried a start time that is not after now (StartInPastError); nothing is created.
+	ErrStartInPast = errors.New("ota: the start time is not in the future")
 )
+
+// StartInPastError refuses a start time that is not after Now. Its text is the sentence the preview shows.
+type StartInPastError struct{ Now time.Time }
+
+func (e *StartInPastError) Error() string {
+	return "Choose a time in the future. It is now " + WhenText(e.Now) + "."
+}
+
+// Is makes errors.Is(err, ErrStartInPast) true.
+func (e *StartInPastError) Is(target error) bool { return target == ErrStartInPast }
 
 // Refusal names one device Submit did not accept and why.
 type Refusal struct {
@@ -200,6 +214,8 @@ type Engine struct {
 	fixing  map[model.JobID]bool       // running policy jobs, which cannot be cancelled
 	byDev   map[model.DeviceID]model.JobID
 	wake    chan struct{}
+	// refusedStarts: scheduled jobs whose due start the device refused, until they leave the state (scheduled.go).
+	refusedStarts map[model.JobID]startRefusal
 }
 
 // NewEngine wires an engine. A zero Options.Machine means DefaultConfig,
@@ -218,6 +234,7 @@ func NewEngine(o Options, jobs store.JobStore, devices store.DeviceStore, api De
 		opts: o, audit: o.Audit, jobs: jobs, devices: devices, api: api, fw: fw, backups: b, clk: clk, notify: n,
 		sel: fwselectFuncs{}, paths: o.Paths, safebootPush: safebootPushEnabled, log: slog.Default().With("component", "ota"),
 		workers: map[model.JobID]chan Event{}, fixing: map[model.JobID]bool{}, byDev: map[model.DeviceID]model.JobID{}, wake: make(chan struct{}, 1),
+		refusedStarts: map[model.JobID]startRefusal{},
 	}
 }
 
@@ -282,8 +299,8 @@ type Request struct {
 	// with tasmofleet's own URL, which a fresh preflight would otherwise
 	// record as the one to restore.
 	OriginalOtaURL string
-	// StartAt is when the job may start (Job.StartAt); zero starts at once. A retry never sets it.
-	// Submit refuses a non-zero StartAt with ErrStartAtUnsupported until scheduled starts run (#603).
+	// StartAt is when the job may start (Job.StartAt, #603); zero starts at once. Submit refuses a time that
+	// is not after now (StartInPastError). A retry never sets it.
 	StartAt time.Time
 }
 
@@ -574,8 +591,8 @@ func (e *Engine) previewDevice(ctx context.Context, d model.Device, r Request) P
 	return it
 }
 
-// Submit validates and persists a batch; jobs start as queued. It is
-// all-or-nothing: devices that are excluded, already have an active job, or
+// Submit validates and persists a batch; jobs start as queued, or as scheduled when the request has a
+// StartAt (#603). It is all-or-nothing: devices that are excluded, already have an active job, or
 // whose preview is skip/refuse are returned in a *RefusedError and no job
 // is created.
 func (e *Engine) Submit(ctx context.Context, actor string, reqs []Request) (model.BatchID, error) {
@@ -591,9 +608,10 @@ func (e *Engine) submit(ctx context.Context, actor string, reqs []Request, retry
 	if len(reqs) == 0 {
 		return 0, nil, errors.New("ota: empty batch")
 	}
+	checked := e.clk.Now()
 	for _, r := range reqs {
-		if !r.StartAt.IsZero() {
-			return 0, nil, fmt.Errorf("%w (device %d)", ErrStartAtUnsupported, r.DeviceID)
+		if !r.StartAt.IsZero() && !r.StartAt.After(checked) {
+			return 0, nil, &StartInPastError{Now: checked} // before anything is read or created
 		}
 	}
 	var ref []Refusal
@@ -610,7 +628,7 @@ func (e *Engine) submit(ctx context.Context, actor string, reqs []Request, retry
 			return 0, nil, fmt.Errorf("ota: submit: %w", err)
 		}
 		if len(act) > 0 {
-			ref = append(ref, Refusal{r.DeviceID, fmt.Sprintf("already has active job %d", act[0].ID)})
+			ref = append(ref, Refusal{r.DeviceID, busyText(act[0])})
 			continue
 		}
 		rest = append(rest, r)
@@ -662,6 +680,9 @@ func (e *Engine) submit(ctx context.Context, actor string, reqs []Request, retry
 		if r.AllowVariantChange {
 			j.TargetVariant = r.Variant
 		}
+		if !r.StartAt.IsZero() {
+			j.State, j.StartAt = model.JobScheduled, r.StartAt
+		}
 		it := byItem[r.DeviceID]
 		j.Transport = it.Transport
 		if it.LanguageDeclared {
@@ -688,13 +709,24 @@ func (e *Engine) submit(ctx context.Context, actor string, reqs []Request, retry
 	return id, skipped, nil
 }
 
+// activeStates are the states of a job that holds its device: another job, a retry or a bulk operation is
+// refused for it. A scheduled job holds it too, until it starts or ends (#603).
 var activeStates = []model.JobState{
-	model.JobQueued, model.JobPreflight, model.JobBackup, model.JobSetOtaURL,
+	model.JobScheduled, model.JobQueued, model.JobPreflight, model.JobBackup, model.JobSetOtaURL,
 	model.JobSafebootSwitch, model.JobSafebootRecover,
 	model.JobUpgradeIssued, model.JobAwaitReboot, model.JobVerify, model.JobRestoreOtaURL, model.JobApplying,
 }
 
-// Cancel requests cancellation. Jobs past ActUpgrade cannot stop the device
+// busyText is why a device with the active job j is refused: the job, or for a scheduled update its
+// transaction and start, so the person knows which plan to cancel first.
+func busyText(j model.Job) string {
+	if j.State == model.JobScheduled {
+		return fmt.Sprintf("has a scheduled update (TX-%04d) that starts %s; cancel it first", j.BatchID, WhenText(j.StartAt))
+	}
+	return fmt.Sprintf("already has active job %d", j.ID)
+}
+
+// Cancel requests cancellation. A scheduled job ends at once and never starts. Jobs past ActUpgrade cannot stop the device
 // flashing; they are marked cancelled only once the device is reachable again.
 func (e *Engine) Cancel(ctx context.Context, actor string, id model.JobID) error {
 	ev := Event{Kind: EvCancel, Err: "cancelled by " + actor}
@@ -721,6 +753,7 @@ func (e *Engine) Cancel(ctx context.Context, actor string, id model.JobID) error
 	if _, _, ok := e.apply(ctx, j, ev); !ok {
 		return fmt.Errorf("ota: cancel job %d: could not persist", id)
 	}
+	delete(e.refusedStarts, id)
 	return nil
 }
 
@@ -805,33 +838,43 @@ func (e *Engine) Run(ctx context.Context) error {
 	var wg sync.WaitGroup
 	defer wg.Wait()
 	for _, j := range active {
-		if j.State != model.JobQueued {
+		if j.State != model.JobQueued && j.State != model.JobScheduled {
 			// Resumed jobs hold a slot even beyond MaxParallel: the
-			// devices are mid-update and must be followed.
+			// devices are mid-update and must be followed. A scheduled job
+			// has not started; schedule looks at its start time.
 			e.startWorker(ctx, &wg, j, Event{Kind: EvResume})
 		}
 	}
 	for {
-		if err := e.schedule(ctx, &wg); err != nil && ctx.Err() == nil {
+		next, err := e.schedule(ctx, &wg)
+		if err != nil && ctx.Err() == nil {
 			e.log.Error("ota scheduling failed", "err", err)
+			next = e.clk.Now().Add(scheduledRecheck) // a start that is due must not wait for the next submit
+		}
+		var due <-chan time.Time // nil: nothing waits for a time
+		if !next.IsZero() {
+			due = e.clk.After(min(next.Sub(e.clk.Now()), scheduledRecheck))
 		}
 		select {
 		case <-ctx.Done():
 			return nil
 		case <-e.wake:
+		case <-due:
 		}
 	}
 }
 
-// schedule starts queued jobs FIFO by job ID while slots are free. A job of a
-// transaction with its own cap (BatchParallel, bulk options) waits only for
-// that cap: it neither waits for nor takes a fleet-wide slot.
-func (e *Engine) schedule(ctx context.Context, wg *sync.WaitGroup) error {
+// schedule queues the scheduled jobs whose start has come (startDue), then starts queued jobs FIFO by job
+// ID while slots are free. A job of a transaction with its own cap (BatchParallel, bulk options) waits only
+// for that cap: it neither waits for nor takes a fleet-wide slot. It returns when a scheduled job needs a
+// look again (zero: none waits).
+func (e *Engine) schedule(ctx context.Context, wg *sync.WaitGroup) (time.Time, error) {
 	active, err := e.jobs.ActiveJobs(ctx)
 	if err != nil {
-		return err
+		return time.Time{}, err
 	}
 	sort.Slice(active, func(a, b int) bool { return active[a].ID < active[b].ID })
+	next := e.startDue(ctx, active)
 	running := map[model.BatchID]int{}
 	e.mu.Lock()
 	free := e.maxParallel() - len(e.workers)
@@ -856,7 +899,7 @@ func (e *Engine) schedule(ctx context.Context, wg *sync.WaitGroup) error {
 			}
 		}
 	}
-	return nil
+	return next, nil
 }
 
 func (e *Engine) startWorker(ctx context.Context, wg *sync.WaitGroup, j model.Job, first Event) bool {

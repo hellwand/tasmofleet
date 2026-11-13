@@ -80,7 +80,7 @@ func (a *runtime) setupOTA() {
 	a.engine = ota.NewEngine(
 		ota.Options{Machine: cfgM, MaxParallel: a.cfg.OTAParallel, Audit: a.svc.Audit, Policy: a.policyApplier(), Templates: a.templateApplier(),
 			Commands: a.deviceCmd, Principals: principalResolver{local: a.svc.Store, dir: a.svc.Store}, Paths: a.updatePaths(),
-			HoldFlashing: a.holdFlashing},
+			HoldFlashing: a.holdFlashing, StartCheck: a.otaStartCheck()},
 		a.svc.Store, a.svc.Store, ota.NewDeviceAPI(a.svc.Client), a.cache, a.backups, clock.Real{}, jobNotifier{rt: a},
 	)
 	if a.templates != nil {
@@ -91,6 +91,12 @@ func (a *runtime) setupOTA() {
 		h := a.startOTAHints(a.svc.Store.ListDevices, a.engine)
 		a.bus.Subscribe([]mqttbus.Kind{mqttbus.KindUpgrade}, h.onUpgradeReport)
 	}
+}
+
+// otaStartCheck is the engine's check at the start of a scheduled update: the device lock and the firmware
+// holds, as lockedOTA.Submit checks them for a person (#603).
+func (a *runtime) otaStartCheck() func(context.Context, model.DeviceID) (func(), error) {
+	return deviceGuard{locks: a.deviceLocks(), holds: a.fwHolds}.startCheck // no job check: the scheduled job itself holds the device
 }
 
 // otaHintQueue bounds the UPGRADE hints that wait for the worker.

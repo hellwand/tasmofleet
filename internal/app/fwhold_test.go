@@ -298,3 +298,53 @@ func TestObserverKeepsTheHoldWhileTheDeviceRunsMinimalFirmware(t *testing.T) {
 	}
 	t.Fatal("the real firmware back after an Offline must release the hold")
 }
+
+// Why (#603): a scheduled update starts without a person pressing a button, but at its start the device must
+// pass what a person's Submit checks: the device lock (a console command or a settings write in progress must
+// not be interleaved with the update) and the firmware holds (a typed "Upgrade 1" still flashing; two
+// updates at once can brick a device). TasmoFleet's own start never waits for the lock: the engine tries
+// again inside the window. The lock is held until the engine releases it (after storing the job as queued).
+func TestScheduledStartChecksTheLockAndTheHoldsLikeSubmit(t *testing.T) {
+	ctx := context.Background()
+	_, holds, clk := newHoldGuard()
+	a := &runtime{devLocks: devlock.New(), fwHolds: holds}
+	check := a.otaStartCheck()
+
+	releaseConsole, _, _ := a.devLocks.TryAcquire(1, "console")
+	if _, err := check(ctx, 1); busyHolderOf(t, err) != "console" {
+		t.Fatalf("a device a person's command holds must refuse the start, got %v", err)
+	}
+	releaseConsole()
+
+	releaseRead, _, _ := a.devLocks.TryAcquire(1, backgroundRead)
+	began := time.Now()
+	if _, err := check(ctx, 1); busyHolderOf(t, err) != backgroundRead || time.Since(began) > backgroundGrace/2 {
+		t.Fatalf("a background read must refuse the start at once (the engine retries), got %v after %v", err, time.Since(began))
+	}
+	releaseRead()
+
+	holds.Start(1, 0)
+	if _, err := check(ctx, 1); err == nil || !strings.Contains(err.Error(), "wait until it has restarted") {
+		t.Fatalf("a device a typed firmware update holds must refuse the start, got %v", err)
+	}
+	if release, _, ok := a.devLocks.TryAcquire(1, "x"); !ok {
+		t.Fatal("the refused start kept the device lock")
+	} else {
+		release()
+	}
+
+	clk.advance(firmwareHoldTimeout + time.Minute)
+	release, err := check(ctx, 1)
+	if err != nil {
+		t.Fatalf("a free device must pass the start check: %v", err)
+	}
+	if _, holder, ok := a.devLocks.TryAcquire(1, "console"); ok || holder != "ota" {
+		t.Fatalf("the device lock must be held as ota until the engine releases it (holder %q)", holder)
+	}
+	release()
+	if r, _, ok := a.devLocks.TryAcquire(1, "console"); !ok {
+		t.Fatal("the lock was not given back")
+	} else {
+		r()
+	}
+}

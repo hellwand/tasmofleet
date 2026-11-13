@@ -154,7 +154,7 @@ func (e *Engine) submitPolicy(ctx context.Context, actor string, kind model.JobK
 			return 0, nil, fmt.Errorf("ota: submit policy: %w", err)
 		}
 		if len(act) > 0 {
-			skipped = append(skipped, Refusal{r.DeviceID, fmt.Sprintf("already has active job %d", act[0].ID)})
+			skipped = append(skipped, Refusal{r.DeviceID, busyText(act[0])})
 			continue
 		}
 		jobs = append(jobs, model.Job{DeviceID: r.DeviceID, Kind: kind, Commands: strings.Join(r.Commands, "\n"),
@@ -221,7 +221,7 @@ func (e *Engine) retryPolicy(ctx context.Context, actor string, batchID model.Ba
 			return res, fmt.Errorf("ota: retry batch %d: %w", batchID, err)
 		}
 		if len(act) > 0 {
-			ref = append(ref, Refusal{r.DeviceID, fmt.Sprintf("already has active job %d", act[0].ID)})
+			ref = append(ref, Refusal{r.DeviceID, busyText(act[0])})
 		}
 	}
 	if len(ref) > 0 {

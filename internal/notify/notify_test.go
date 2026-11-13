@@ -410,3 +410,46 @@ func TestSnapshotMissedIsTheSnapshotFailureEventWithTheSkippedTime(t *testing.T)
 		t.Error("with snapshot notifications off the skipped snapshot must stay silent")
 	}
 }
+
+// Why (#603, #604): a scheduled update that did not start because TasmoFleet was down is something the
+// person planned and nobody sees otherwise. It follows the update setting (no switch of its own), is sent
+// under "only problems" too, ranks as a problem on ntfy and Gotify, words the mockup's message and opens the
+// transaction.
+func TestUpdateNotStartedFollowsTheUpdateSettingAndIsAProblem(t *testing.T) {
+	c := baseConfig()
+	// The start comes from the store, which reads times back in UTC; the text must read on the server's clock.
+	start := time.Date(2026, 11, 5, 3, 0, 0, 0, time.Local).UTC()
+	ev := UpdateNotStarted(c, 8, 12, "16.1.0", start, start.Add(72*time.Minute))
+	if ev.Name != EventUpdateNotStarted || ev.Result != ResultNotStarted || ev.Title != "Scheduled update not started" {
+		t.Fatalf("event %q result %q title %q", ev.Name, ev.Result, ev.Title)
+	}
+	want := "TX-0008 (Update to Tasmota 16.1.0, 12 devices) was planned for Thu, Nov 5 at 03:00. TasmoFleet was down and was not back within 60 minutes, " +
+		"so the update was not started and no device was changed. Plan it again to run it."
+	if ev.Text != want {
+		t.Fatalf("text\n%q\nwant\n%q", ev.Text, want)
+	}
+	if ev.Path != "/transactions/8" || !strings.HasSuffix(ev.URL, "/transactions/8") || !ev.Time.Equal(start.Add(72*time.Minute)) {
+		t.Fatalf("path %q url %q time %v: the transaction page, at the time TasmoFleet was back", ev.Path, ev.URL, ev.Time)
+	}
+	for _, tc := range []struct {
+		name string
+		mod  func(*config.Config)
+		want bool
+	}{
+		{"any", func(*config.Config) {}, true},
+		{"only problems", func(c *config.Config) { c.NotifyUpdateWhen = config.NotifyWhenProblems }, true},
+		{"update notifications off", func(c *config.Config) { c.NotifyUpdate = false }, false},
+	} {
+		c := baseConfig()
+		tc.mod(&c)
+		if got := Selected(c, ev); got != tc.want {
+			t.Errorf("%s: Selected = %v, want %v", tc.name, got, tc.want)
+		}
+	}
+	if !problem(ev) {
+		t.Error("a planned update that did not start must rank as a problem (ntfy, Gotify priority)")
+	}
+	if one := UpdateNotStarted(c, 9, 1, "", start, start); !strings.HasPrefix(one.Text, "TX-0009 (Update, 1 device) was planned") {
+		t.Errorf("without one target release: %q", one.Text)
+	}
+}
