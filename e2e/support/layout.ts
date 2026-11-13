@@ -195,7 +195,7 @@ export async function layoutGuards(page: Page, which: GuardId[] = allGuards): Pr
       return false;
     };
     const CONTROLS = "button, a.button, summary.button, label.button, .badge, input[type=checkbox], input[type=radio]";
-    const controls = [...document.querySelectorAll(CONTROLS)].filter((e) => visible(e) && !e.matches("button.info") && !scrolledAway(e));
+    const controls = [...document.querySelectorAll(CONTROLS)].filter((e) => visible(e) && !scrolledAway(e));
 
     // ---- (a) controls and badges inside their row, cell and card ----
     if (which.includes("a")) {
@@ -297,7 +297,7 @@ export async function layoutGuards(page: Page, which: GuardId[] = allGuards): Pr
     // ---- (c) labels and row controls vertically centred (2 px) ----
     if (which.includes("c")) {
       for (const e of document.querySelectorAll("button, a.button, summary.button, label.button, .badge, .navtop, .relay-btn")) {
-        if (!visible(e) || e.matches("button.info") || inOverlay(e)) continue;
+        if (!visible(e) || inOverlay(e)) continue;
         const tr = textRect(e);
         if (!tr) continue;
         const r = rectOf(e);
@@ -354,7 +354,7 @@ export async function layoutGuards(page: Page, which: GuardId[] = allGuards): Pr
       const GROUPS = ".card, .dlg-head, .dlg-foot, .udlg-foot, dialog, .toolbar, .actions, .bulkbar, .page-head, .savebar, .pager, .summary-bar";
       const groups = new Map<Element, Element[]>();
       for (const e of document.querySelectorAll("button, a.button, summary.button, label.button")) {
-        if (!visible(e) || e.matches("button.info, .colbtn") || inOverlay(e) || e.closest(".bulkbar, .actionbar")) continue;
+        if (!visible(e) || e.matches(".colbtn") || inOverlay(e) || e.closest(".bulkbar, .actionbar")) continue;
         const g = e.closest("tr") ? e.closest("table")! : (e.closest(GROUPS) ?? e.parentElement!);
         const list = groups.get(g) ?? [];
         list.push(e);
