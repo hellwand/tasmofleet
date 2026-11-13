@@ -26,7 +26,7 @@ test.afterAll(async () => {
  * of the scroll range (left pins at the start, right pins at the end), so there nothing may lie under it.
  */
 async function overlaps(page: Page): Promise<string[]> {
-  return page.evaluate(() => {
+  return page.evaluate(async () => {
     const t = document.querySelector<HTMLTableElement>(
       "table[data-table=devices]",
     )!;
@@ -126,10 +126,28 @@ async function overlaps(page: Page): Promise<string[]> {
       }
     }
     // What the user sees first (scroll 0): the right pins lie over the columns that have not scrolled in
-    // yet. A column may be wholly under them (the table scrolls, the rest is reachable) but never cut
-    // in half: "seen 1" and a toggle beside half an Uptime value read as an overlap.
+    // yet. A column may be wholly under them (the table scrolls, the rest is reachable), or cut at their
+    // edge when that edge shows it scrolls on (below); never cut in half by a bare edge: "seen 1" and a
+    // toggle beside half an Uptime value read as an overlap.
     scroller.scrollLeft = 0;
+    // the page marks which edges have columns under them on the scroll event, which comes before the next frame
+    await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
     const frame = scroller.getBoundingClientRect();
+    // #790: the pinned columns are the ends of the scroll area. A column that runs on under them is cut at
+    // their edge as a column is cut at the edge of any box that scrolls, and that edge is drawn: a shade on
+    // the scrolling side (as on the cut edge of a dialog or a log box). With it a column cut there reads as
+    // one that scrolls on; without it, text that runs flush into the pin reads as covered, half a column.
+    const shaded = (pin: HTMLElement) => {
+      const b = getComputedStyle(pin, "::before");
+      return (
+        getComputedStyle(pin).overflowX === "visible" &&
+        b.content !== "none" &&
+        b.position === "absolute" &&
+        /gradient/.test(b.backgroundImage) &&
+        parseFloat(b.width) >= 4 &&
+        Math.abs(parseFloat(b.right) - pin.clientWidth) < 1.5 // it lies left of the pin, over the scrolling cells
+      );
+    };
     const scrolls = scroller.scrollWidth > scroller.clientWidth + 1;
     for (const row of t.querySelectorAll<HTMLTableRowElement>(
       "thead tr, tbody tr",
@@ -140,6 +158,7 @@ async function overlaps(page: Page): Promise<string[]> {
       const pins = cells.filter((_, j) => side.get(j) === "r");
       if (!pins.length) continue;
       const from = Math.min(...pins.map((p) => p.getBoundingClientRect().left));
+      const edge = pins.find((p) => p.getBoundingClientRect().left === from)!;
       cells.forEach((c, i) => {
         if (side.has(i) || hidden(c)) return;
         const own = c.getBoundingClientRect();
@@ -151,7 +170,8 @@ async function overlaps(page: Page): Promise<string[]> {
         if (seen <= 0.5 || under <= 0.5) return;
         const what = `${row.parentElement!.tagName.toLowerCase()} ${c.dataset.label ?? i} (${Math.round(own.left)}-${Math.round(own.right)}) under the pinned columns from ${Math.round(from)}`;
         if (!scrolls) out.push(`${what}, although the table does not scroll`);
-        else if (under < seen - 0.5) out.push(`${what}: cut in half`);
+        else if (under < seen - 0.5 && !shaded(edge))
+          out.push(`${what}: cut in half, and the pins' edge does not show that it scrolls on`);
       });
     }
     // every row of a pinned column has the same inner padding (a two-relay row's switches sat flush on the border)
@@ -241,13 +261,10 @@ for (const theme of ["light", "dark"]) {
 // rule as the default one: what lies under a pinned column is only ever a column that has not
 // scrolled in yet, and at either end of the scroll range nothing lies under a pin.
 //
-// OPEN (#773, third criterion): at scroll 0 one column straddles the right pins' edge in such a layout
-// (Uptime 9 px under Power as the issue measured it, a neighbouring column in this fleet), because the
-// cut that makes it whole (cutAtPins in tables.js) runs only for the default layout. Calling it from the
-// saved-layout fit (fitPinned, class tfix) did not make the straddler whole (tried, not understood
-// further: a saved layout is percentages in a fixed table), so this needs the saved-layout fit
-// looked at properly, not a small change. Only that finding is left out below; the issue stays open for it.
-const straddleOpen = (f: string) => f.endsWith(": cut in half");
+// A column cut in half at scroll 0 is a finding here too (#790), unless the pins' edge shows that it scrolls
+// on: the scroll area of the unpinned columns ends at the pins. A saved layout is not cut to the pins (its
+// widths are the person's, and a fit that changed one fought every drag of it, see the next test), so at
+// most window widths one column runs on under the pins, and that edge has to say so.
 for (const width of [1280, 1440]) {
   test(`a saved layout wider than the page, ${width} px: no column lies under a pinned column at either end of the scroll`, async ({
     page,
@@ -287,7 +304,7 @@ for (const width of [1280, 1440]) {
       });
       expect(wider, "the saved layout has to be wider than the page for this case to mean anything").toBe(true);
       await expect
-        .poll(async () => (await overlaps(page)).filter((f) => !straddleOpen(f)), {
+        .poll(() => overlaps(page), {
           timeout: 5_000,
           message: "a column of the saved layout lies under a pinned column",
         })
@@ -299,5 +316,167 @@ for (const width of [1280, 1440]) {
       await page.locator("details.colmenu [data-cols-reset]").first().click();
       await page.waitForLoadState("load");
     }
+  });
+}
+
+// the saved layout of the case above (OTA URL and Group topic shown), as the server sends it on the next visit;
+// the shared fleet's layout is reset afterwards
+async function withSavedLayout(
+  page: Page,
+  width: number,
+  body: () => Promise<void>,
+): Promise<void> {
+  await page.setViewportSize({ width, height: 900 });
+  await page.setExtraHTTPHeaders(designAdmin);
+  await page.goto(stack.app.url + "/devices");
+  await page.locator("table[data-table=devices] tbody tr").first().waitFor();
+  await page.locator(".pwr").first().waitFor({ state: "attached", timeout: 20_000 });
+  const menu = page.locator("details.colmenu").first();
+  try {
+    await menu.locator("summary").click();
+    for (const name of ["OTA URL", "Group topic"]) {
+      const done = page.waitForResponse(
+        (r) =>
+          r.url().endsWith("/prefs/table.devices") &&
+          r.request().method() === "POST" &&
+          r.status() === 204,
+      );
+      await menu.getByRole("checkbox", { name }).check();
+      await done;
+    }
+    await page.goto(stack.app.url + "/devices");
+    await page.locator("table[data-table=devices] tbody tr").first().waitFor();
+    await page.locator(".pwr").first().waitFor({ state: "attached", timeout: 20_000 });
+    await page.evaluate(() => document.fonts.ready);
+    await expect(page.locator("table[data-table=devices]")).toHaveClass(/tfix/);
+    await body();
+  } finally {
+    await page.goto(stack.app.url + "/devices");
+    await page.locator("details.colmenu").first().locator("summary").click();
+    await page.locator("details.colmenu [data-cols-reset]").first().click();
+    await page.waitForLoadState("load");
+  }
+}
+
+// #790: in a saved layout that scrolls, the last column seen whole before the right pins is the one a person
+// most likely widens or narrows to see more. It must follow the pointer and the arrow keys like any other
+// column. An earlier fix for the column under the pins widened this one back to the pins' edge on every
+// step of a drag: the column stayed where it was while the pointer moved 40 px, and jumped on release.
+for (const width of [1280, 1440]) {
+  test(`a saved layout that scrolls: the last whole column before the pins follows a drag and a key step, ${width} px`, async ({
+    page,
+  }) => {
+    await withSavedLayout(page, width, async () => {
+      const at = await page.evaluate(() => {
+        const t = document.querySelector<HTMLTableElement>("table[data-table=devices]")!;
+        const s = t.closest<HTMLElement>(".tablescroll")!;
+        s.scrollLeft = 0;
+        const side = new Map<number, string>();
+        for (const c of t.classList) {
+          const m = /^p([lr])(\d+)$/.exec(c);
+          if (m) side.set(parseInt(m[2], 10) - 1, m[1]);
+        }
+        const th = [...t.tHead!.rows[0].cells] as HTMLElement[];
+        const edge = Math.min(
+          ...th.filter((_, j) => side.get(j) === "r").map((p) => p.getBoundingClientRect().left),
+        );
+        let i = -1;
+        th.forEach((h, j) => {
+          if (side.has(j) || h.offsetParent === null) return;
+          if (h.getBoundingClientRect().right <= edge + 0.5) i = j;
+        });
+        return { i, label: th[i]?.textContent!.trim() ?? "", scrolls: s.scrollWidth > s.clientWidth + 1 };
+      });
+      expect(at.scrolls, "the saved layout has to scroll for this case to mean anything").toBe(true);
+      expect(at.i, "no scrolling column is seen whole at scroll 0").toBeGreaterThan(1);
+      // Measured on the table the page shows, in one step: a locator resolves the cell in one call and measures
+      // it in the next, and a live reload of the list in between left it measuring a removed cell (0 px).
+      const shown = () =>
+        page.evaluate((i) => {
+          const cell = document.querySelector<HTMLTableElement>("table[data-table=devices]")!.tHead!.rows[0].cells[i];
+          return {
+            w: cell.getBoundingClientRect().width,
+            now: Number(cell.querySelector(".colhandle")?.getAttribute("aria-valuenow")),
+          };
+        }, at.i);
+      const w = async () => (await shown()).w;
+      const handle = page.getByRole("separator", { name: `Resize column ${at.label}` });
+      const w0 = await w();
+      // the middle of the handle, read in one step for the same reason
+      const { x, y } = await page.evaluate((i) => {
+        const cell = document.querySelector<HTMLTableElement>("table[data-table=devices]")!.tHead!.rows[0].cells[i];
+        const b = cell.querySelector(".colhandle")!.getBoundingClientRect();
+        return { x: b.x + b.width / 2, y: b.y + b.height / 2 };
+      }, at.i);
+      await page.mouse.move(x, y);
+      await page.mouse.down();
+      for (const k of [1, 2, 3, 4]) await page.mouse.move(x - 10 * k, y);
+      // While the pointer is held. Every step below is laid out in the event that makes it (pointermove,
+      // pointerup, keydown), so each is read once, with no waiting: a poll's first read could take longer
+      // than its timeout on a loaded machine.
+      const moved = (await w()) - w0;
+      expect(moved, `${at.label} while the pointer is held 40 px left of where it took the handle`).toBeLessThanOrEqual(-38);
+      expect(moved, `${at.label} narrowed by more than the pointer moved`).toBeGreaterThanOrEqual(-42);
+      // A device event reloads the whole list (#devtable) about once a second in a busy fleet, so a reload
+      // lands while a person holds a handle. Until #806 the new table came with the saved widths and the
+      // column jumped back to them until the pointer moved again (this test failed whenever a reload landed
+      // in the second after the last move). The reload is forced here, so that case is always checked.
+      const swap = await page.evaluate(
+        (i) =>
+          new Promise<{ replaced: boolean; swapped: number; settled: number }>((done) => {
+            const width = () => {
+              const t = document.querySelector<HTMLTableElement>("table[data-table=devices]")!;
+              return t.tHead!.rows[0].cells[i].getBoundingClientRect().width;
+            };
+            const before = document.querySelector("table[data-table=devices]");
+            let swapped = -1;
+            const onSwap = (e: Event) => {
+              if ((e.target as Element).id === "devtable") swapped = width(); // the first frame drawn after the swap
+            };
+            const onSettle = (e: Event) => {
+              if ((e.target as Element).id !== "devtable") return;
+              document.removeEventListener("htmx:afterSwap", onSwap);
+              document.removeEventListener("htmx:afterSettle", onSettle);
+              done({ replaced: document.querySelector("table[data-table=devices]") !== before, swapped, settled: width() });
+            };
+            document.addEventListener("htmx:afterSwap", onSwap);
+            document.addEventListener("htmx:afterSettle", onSettle);
+            (window as unknown as { htmx: { trigger(s: string, n: string): void } }).htmx.trigger("#devtable", "sse:resync");
+          }),
+        at.i,
+      );
+      expect(swap.replaced, "the reload replaced the table").toBe(true);
+      for (const [when, got] of [
+        ["right after", swap.swapped],
+        ["once settled after", swap.settled],
+      ] as const) {
+        expect(got - w0, `${at.label} ${when} a reload of the list while the pointer is held`).toBeLessThanOrEqual(-38);
+        expect(got - w0, `${at.label} ${when} a reload of the list while the pointer is held`).toBeGreaterThanOrEqual(-42);
+      }
+      const held = await w();
+      const saved = page.waitForResponse(
+        (r) => r.url().endsWith("/prefs/table.devices") && r.request().method() === "POST",
+      );
+      await page.mouse.up();
+      await saved;
+      expect(
+        Math.abs((await w()) - held),
+        `${at.label} on release against its width while held (${held.toFixed(1)} px)`,
+      ).toBeLessThanOrEqual(1);
+      // one step of the arrow keys: 10 px, and the handle announces the width the column has
+      await handle.focus();
+      const stepped = page.waitForResponse(
+        (r) => r.url().endsWith("/prefs/table.devices") && r.request().method() === "POST",
+      );
+      await page.keyboard.press("ArrowLeft");
+      await stepped;
+      const now = await shown();
+      expect(now.w - held, `${at.label} after one ArrowLeft`).toBeLessThanOrEqual(-8);
+      expect(now.w - held, `${at.label} narrowed by more than one step`).toBeGreaterThanOrEqual(-12);
+      expect(
+        Math.abs(now.now - now.w),
+        `aria-valuenow against the width ${at.label} shows (${now.w.toFixed(1)} px)`,
+      ).toBeLessThanOrEqual(1);
+    });
   });
 }

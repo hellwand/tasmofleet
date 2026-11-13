@@ -7857,6 +7857,110 @@ form.useradd:has(input[name="otp"][value="1"]:checked) .useradd-pw {
   ) {
     box-shadow: inset 1px 0 0 var(--color-border);
   }
+  /* #790: the pinned columns are the ends of the scroll area. While columns lie under a pinned group,
+     its inner edge (tables.js: pelN/perN on the table, more-l/more-r on the scroll box) casts a shade
+     over the scrolling side, as the cut edge of a dialog or a log box does: a column cut there reads as
+     one that scrolls on, not as one that is covered. The cell lets the shade out of its box (a pinned
+     cell is as wide as its content, it has nothing to cut off). :is, not :where: this has to win over
+     the cut-off of a saved layout's cells (table.tfix). */
+  :is(
+    .tablescroll.more-l > table.pel1 > :is(thead, tbody) > tr > :nth-child(1),
+    .tablescroll.more-l > table.pel2 > :is(thead, tbody) > tr > :nth-child(2),
+    .tablescroll.more-l > table.pel3 > :is(thead, tbody) > tr > :nth-child(3),
+    .tablescroll.more-l > table.pel4 > :is(thead, tbody) > tr > :nth-child(4),
+    .tablescroll.more-l > table.pel5 > :is(thead, tbody) > tr > :nth-child(5),
+    .tablescroll.more-l > table.pel6 > :is(thead, tbody) > tr > :nth-child(6),
+    .tablescroll.more-l > table.pel7 > :is(thead, tbody) > tr > :nth-child(7),
+    .tablescroll.more-l > table.pel8 > :is(thead, tbody) > tr > :nth-child(8),
+    .tablescroll.more-l > table.pel9 > :is(thead, tbody) > tr > :nth-child(9),
+    .tablescroll.more-l > table.pel10 > :is(thead, tbody) > tr > :nth-child(10),
+    .tablescroll.more-l > table.pel11 > :is(thead, tbody) > tr > :nth-child(11),
+    .tablescroll.more-l > table.pel12 > :is(thead, tbody) > tr > :nth-child(12),
+    .tablescroll.more-l > table.pel13 > :is(thead, tbody) > tr > :nth-child(13),
+    .tablescroll.more-l > table.pel14 > :is(thead, tbody) > tr > :nth-child(14),
+    .tablescroll.more-l > table.pel15 > :is(thead, tbody) > tr > :nth-child(15),
+    .tablescroll.more-l > table.pel16 > :is(thead, tbody) > tr > :nth-child(16),
+    .tablescroll.more-r > table.per1 > :is(thead, tbody) > tr > :nth-child(1),
+    .tablescroll.more-r > table.per2 > :is(thead, tbody) > tr > :nth-child(2),
+    .tablescroll.more-r > table.per3 > :is(thead, tbody) > tr > :nth-child(3),
+    .tablescroll.more-r > table.per4 > :is(thead, tbody) > tr > :nth-child(4),
+    .tablescroll.more-r > table.per5 > :is(thead, tbody) > tr > :nth-child(5),
+    .tablescroll.more-r > table.per6 > :is(thead, tbody) > tr > :nth-child(6),
+    .tablescroll.more-r > table.per7 > :is(thead, tbody) > tr > :nth-child(7),
+    .tablescroll.more-r > table.per8 > :is(thead, tbody) > tr > :nth-child(8),
+    .tablescroll.more-r > table.per9 > :is(thead, tbody) > tr > :nth-child(9),
+    .tablescroll.more-r > table.per10 > :is(thead, tbody) > tr > :nth-child(10),
+    .tablescroll.more-r > table.per11 > :is(thead, tbody) > tr > :nth-child(11),
+    .tablescroll.more-r > table.per12 > :is(thead, tbody) > tr > :nth-child(12),
+    .tablescroll.more-r > table.per13 > :is(thead, tbody) > tr > :nth-child(13),
+    .tablescroll.more-r > table.per14 > :is(thead, tbody) > tr > :nth-child(14),
+    .tablescroll.more-r > table.per15 > :is(thead, tbody) > tr > :nth-child(15),
+    .tablescroll.more-r > table.per16 > :is(thead, tbody) > tr > :nth-child(16)
+  ) {
+    overflow: visible;
+  }
+  :is(
+    .tablescroll.more-l > table.pel1 > :is(thead, tbody) > tr > :nth-child(1),
+    .tablescroll.more-l > table.pel2 > :is(thead, tbody) > tr > :nth-child(2),
+    .tablescroll.more-l > table.pel3 > :is(thead, tbody) > tr > :nth-child(3),
+    .tablescroll.more-l > table.pel4 > :is(thead, tbody) > tr > :nth-child(4),
+    .tablescroll.more-l > table.pel5 > :is(thead, tbody) > tr > :nth-child(5),
+    .tablescroll.more-l > table.pel6 > :is(thead, tbody) > tr > :nth-child(6),
+    .tablescroll.more-l > table.pel7 > :is(thead, tbody) > tr > :nth-child(7),
+    .tablescroll.more-l > table.pel8 > :is(thead, tbody) > tr > :nth-child(8),
+    .tablescroll.more-l > table.pel9 > :is(thead, tbody) > tr > :nth-child(9),
+    .tablescroll.more-l > table.pel10 > :is(thead, tbody) > tr > :nth-child(10),
+    .tablescroll.more-l > table.pel11 > :is(thead, tbody) > tr > :nth-child(11),
+    .tablescroll.more-l > table.pel12 > :is(thead, tbody) > tr > :nth-child(12),
+    .tablescroll.more-l > table.pel13 > :is(thead, tbody) > tr > :nth-child(13),
+    .tablescroll.more-l > table.pel14 > :is(thead, tbody) > tr > :nth-child(14),
+    .tablescroll.more-l > table.pel15 > :is(thead, tbody) > tr > :nth-child(15),
+    .tablescroll.more-l > table.pel16 > :is(thead, tbody) > tr > :nth-child(16)
+  )::before {
+    content: "";
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    left: 100%;
+    width: 12px;
+    background: linear-gradient(
+      to right,
+      color-mix(in srgb, var(--color-text) 14%, transparent),
+      transparent
+    );
+    pointer-events: none;
+  }
+  :is(
+    .tablescroll.more-r > table.per1 > :is(thead, tbody) > tr > :nth-child(1),
+    .tablescroll.more-r > table.per2 > :is(thead, tbody) > tr > :nth-child(2),
+    .tablescroll.more-r > table.per3 > :is(thead, tbody) > tr > :nth-child(3),
+    .tablescroll.more-r > table.per4 > :is(thead, tbody) > tr > :nth-child(4),
+    .tablescroll.more-r > table.per5 > :is(thead, tbody) > tr > :nth-child(5),
+    .tablescroll.more-r > table.per6 > :is(thead, tbody) > tr > :nth-child(6),
+    .tablescroll.more-r > table.per7 > :is(thead, tbody) > tr > :nth-child(7),
+    .tablescroll.more-r > table.per8 > :is(thead, tbody) > tr > :nth-child(8),
+    .tablescroll.more-r > table.per9 > :is(thead, tbody) > tr > :nth-child(9),
+    .tablescroll.more-r > table.per10 > :is(thead, tbody) > tr > :nth-child(10),
+    .tablescroll.more-r > table.per11 > :is(thead, tbody) > tr > :nth-child(11),
+    .tablescroll.more-r > table.per12 > :is(thead, tbody) > tr > :nth-child(12),
+    .tablescroll.more-r > table.per13 > :is(thead, tbody) > tr > :nth-child(13),
+    .tablescroll.more-r > table.per14 > :is(thead, tbody) > tr > :nth-child(14),
+    .tablescroll.more-r > table.per15 > :is(thead, tbody) > tr > :nth-child(15),
+    .tablescroll.more-r > table.per16 > :is(thead, tbody) > tr > :nth-child(16)
+  )::before {
+    content: "";
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    right: 100%;
+    width: 12px;
+    background: linear-gradient(
+      to left,
+      color-mix(in srgb, var(--color-text) 14%, transparent),
+      transparent
+    );
+    pointer-events: none;
+  }
   /* an open row menu lies over the cells of the rows below it, pinned ones included */
   .tablescroll td:has(> details.rowmenu[open]) {
     z-index: 4;

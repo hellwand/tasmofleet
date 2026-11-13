@@ -649,7 +649,55 @@
       var cell = th[n - 1];
       at += cell ? cell.getBoundingClientRect().width : 0;
     });
+    // the pinned column at the inner edge of each group (a hidden one has no width): it draws that edge
+    var inner = { l: 0, r: 0 };
+    left.forEach(function (n) {
+      if (th[n - 1] && th[n - 1].getBoundingClientRect().width > 0) {
+        inner.l = n;
+      }
+    });
+    right.forEach(function (n) {
+      if (th[n - 1] && th[n - 1].getBoundingClientRect().width > 0) {
+        inner.r = n;
+      }
+    });
+    classes.forEach(function (k) {
+      if (/^pe[lr]\d+$/.test(k)) {
+        table.classList.remove(k);
+      }
+    });
+    if (inner.l) {
+      table.classList.add("pel" + inner.l);
+    }
+    if (inner.r) {
+      table.classList.add("per" + inner.r);
+    }
+    scrollEdges(table.parentElement);
   }
+
+  // The pinned columns are the ends of the scroll area (#790). A column that runs on under them is cut at
+  // their edge like a column at the edge of any box that scrolls, and the edge says so: while columns lie
+  // under a pinned group, its inner edge casts a shade over the scrolling side (CSS, classes more-l and
+  // more-r on the scroll box), as the cut edge of a dialog or a log box does. Text that ran flush into a
+  // pinned column read as covered, half a column. No column width is changed for this: the widths are
+  // the person's, and a drag or an arrow key must move exactly the column it acts on.
+  function scrollEdges(frame) {
+    if (!frame || !frame.classList.contains("tablescroll")) {
+      return;
+    }
+    var rest = frame.scrollWidth - frame.clientWidth - frame.scrollLeft;
+    frame.classList.toggle("more-l", frame.scrollLeft > 1);
+    frame.classList.toggle("more-r", rest > 1);
+  }
+  document.addEventListener(
+    "scroll",
+    function (e) {
+      if (e.target instanceof Element) {
+        scrollEdges(e.target);
+      }
+    },
+    { capture: true, passive: true },
+  );
 
   // A table that only mirrors this one (data-follows, e.g. the folded older releases) takes
   // its hidden columns and widths, so the two stay lined up while a column is dragged.

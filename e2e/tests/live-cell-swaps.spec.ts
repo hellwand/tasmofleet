@@ -280,6 +280,9 @@ async function framesAcrossReload(page: Page, act: () => Promise<void>): Promise
       setTimeout(() => (w.__done = true), 300);
     });
   });
+  // The first frame is recorded before the reload is asked for: the reload's answer can be swapped in before
+  // the next frame, and then no frame showed the old table ("the reload replaced the table" failed, #790).
+  await page.waitForFunction(() => (window as unknown as { __frames: Frame[] }).__frames.length > 0);
   await act();
   await page.waitForFunction(() => (window as unknown as { __done: boolean }).__done, null, { timeout: 15_000 });
   return page.evaluate(() => (window as unknown as { __frames: Frame[] }).__frames);
