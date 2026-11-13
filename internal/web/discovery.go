@@ -114,6 +114,8 @@ type moveRow struct {
 	Old, New string
 	Why      string
 	CanApply bool
+	Ignored  bool // dismissed (shown with "Show ignored"): the only action is Restore
+	Conflict bool // a conflict, not an address change
 }
 
 // discoveryOff reports whether MQTT discovery cannot find devices: switched off in the
@@ -155,26 +157,7 @@ func (h *handler) discoveryData(r *http.Request) discView {
 			v.NewCount++
 			v.Rows = append(v.Rows, h.propRow(base, now, p, false))
 		default:
-			m := moveRow{ID: p.ID, Version: p.Version, Name: p.Device.Name, Seen: p.SeenAt,
-				SeenText: agoWords(now, p.SeenAt) + " · " + viaText(p.Via), New: netaddr.Display(p.Device.Address, p.Device.Port, "http"), CanApply: p.Kind == discovery.KindAddressChange}
-			if p.ExistingID != 0 {
-				if d, err := h.d.Inventory.Get(r.Context(), p.ExistingID); err == nil {
-					m.Name, m.Href, m.Old = d.Name, base+"/devices/"+strconv.FormatInt(int64(d.ID), 10), netaddr.Display(d.Address, d.Port, "http")
-					m.Why = moveWhy(p, d)
-					if p.Kind == discovery.KindAddressChange {
-						if merr := discovery.MoveRefusal(d); merr != nil {
-							m.CanApply = false
-							m.Why = capitalize(strings.TrimPrefix(merr.Error(), discovery.ErrNotAcceptable.Error()+": ")) + ". Change it in the device edit form, then dismiss this."
-						}
-					}
-				}
-			}
-			if p.Kind == discovery.KindConflict {
-				m.Why = "Another device claims its address or MQTT topic. Resolve this in the inventory (edit or delete the stored device), then dismiss it."
-				v.Conflicts = append(v.Conflicts, m)
-			} else {
-				v.Moves = append(v.Moves, m)
-			}
+			v.addMove(h.moveRowOf(r.Context(), base, now, p, false))
 		}
 	}
 	ignored, err := h.d.Discovery.Ignored(r.Context())
@@ -186,12 +169,13 @@ func (h *handler) discoveryData(r *http.Request) discView {
 		if p.Via == discovery.ViaMQTT && p.SeenAt.After(v.LastAnnounce) {
 			v.LastAnnounce = p.SeenAt // an ignored device still announced itself
 		}
-		if p.Kind != discovery.KindNew {
-			continue
-		}
-		v.Ignored++
-		if v.ShowIgn {
+		v.Ignored++ // every kind: a dismissed address change or conflict is restored here too (#714)
+		switch {
+		case !v.ShowIgn:
+		case p.Kind == discovery.KindNew:
 			v.Rows = append(v.Rows, h.propRow(base, now, p, true))
+		default:
+			v.addMove(h.moveRowOf(r.Context(), base, now, p, true))
 		}
 	}
 	if !v.LastAnnounce.IsZero() {
@@ -241,6 +225,38 @@ func (h *handler) discoveryData(r *http.Request) discView {
 	}
 	sortRows(v.Rows, v.Sort, v.Dir)
 	return v
+}
+
+// addMove files a row under Address changed or Conflicts.
+func (v *discView) addMove(m moveRow) {
+	if m.Conflict {
+		v.Conflicts = append(v.Conflicts, m)
+	} else {
+		v.Moves = append(v.Moves, m)
+	}
+}
+
+// moveRowOf is the row of an address change or a conflict; an ignored one can only be restored.
+func (h *handler) moveRowOf(ctx context.Context, base string, now time.Time, p discovery.Proposal, ignored bool) moveRow {
+	m := moveRow{ID: p.ID, Version: p.Version, Name: p.Device.Name, Seen: p.SeenAt, Ignored: ignored, Conflict: p.Kind == discovery.KindConflict,
+		SeenText: agoWords(now, p.SeenAt) + " · " + viaText(p.Via), New: netaddr.Display(p.Device.Address, p.Device.Port, "http"),
+		CanApply: p.Kind == discovery.KindAddressChange && !ignored}
+	if p.ExistingID != 0 {
+		if d, err := h.d.Inventory.Get(ctx, p.ExistingID); err == nil {
+			m.Name, m.Href, m.Old = d.Name, base+"/devices/"+strconv.FormatInt(int64(d.ID), 10), netaddr.Display(d.Address, d.Port, "http")
+			m.Why = moveWhy(p, d)
+			if p.Kind == discovery.KindAddressChange {
+				if merr := discovery.MoveRefusal(d); merr != nil {
+					m.CanApply = false
+					m.Why = capitalize(strings.TrimPrefix(merr.Error(), discovery.ErrNotAcceptable.Error()+": ")) + ". Change it in the device edit form, then dismiss this."
+				}
+			}
+		}
+	}
+	if p.Kind == discovery.KindConflict {
+		m.Why = "Another device claims its address or MQTT topic. Resolve this in the inventory (edit or delete the stored device), then dismiss it."
+	}
+	return m
 }
 
 func (h *handler) propRow(base string, now time.Time, p discovery.Proposal, ignored bool) propRow {
