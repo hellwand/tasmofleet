@@ -335,6 +335,21 @@ func TestStoredSnapshotsCardSaysFileNamesAreUTC(t *testing.T) {
 	}
 }
 
+// Why (#766): the worked example in that note is one inline mono span. A browser may break a name at its
+// hyphen, and the span's text then covers two lines: its box reaches back over the "Z" earlier in the
+// sentence, so the text of two elements overlaps (the tablet layout guard failed on exactly that at 768
+// and 1024 px) and the name is hard to read split in two. The example stays whole and moves to the next
+// line when it does not fit, so it carries the nowrap class.
+func TestStoredSnapshotsExampleNameNeverBreaksAcrossLines(t *testing.T) {
+	s := snapSetup(t, true)
+	_, body := s.do(t, "GET", "/settings/system/snapshots", "admin", nil)
+	card := cardOf(t, body, "stored")
+	const want = `<span class="mono nowrap">tasmofleet-20261106-0800Z.db</span>`
+	if !strings.Contains(card, want) {
+		t.Errorf("the example file name in the stored snapshots note can break across lines; want %s in: %s", want, card)
+	}
+}
+
 // Why (#410, maintainer decision; #409 mockup): "Backups of deleted devices" sits in the narrow column
 // under the schedule, below the storage totals; the wide column holds the last run and the device table.
 func TestDeletedDeviceBackupsSitUnderTheDeviceBackupSchedule(t *testing.T) {

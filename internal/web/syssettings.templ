@@ -602,7 +602,7 @@ templ sysDownloadBlock(p sysPage, db sysDB) {
 // sysStoredNote is the note of the "Stored snapshots" card: where they are kept and whose clock the file
 // names and the listed times are on (#683: the names are UTC, the times follow the viewer).
 templ sysStoredNote(db sysDB) {
-	Newest first, in <span class="mono">{ db.Dir }</span>. Delete acts at once. File names are in UTC (the <span class="mono">Z</span>): <span class="mono">tasmofleet-20261106-0800Z.db</span> was taken at 09:00 in Central European Time (10:00 in summer time). The times in this list follow your browser's clock.
+	Newest first, in <span class="mono">{ db.Dir }</span>. Delete acts at once. File names are in UTC (the <span class="mono">Z</span>): <span class="mono nowrap">tasmofleet-20261106-0800Z.db</span> was taken at 09:00 in Central European Time (10:00 in summer time). The times in this list follow your browser's clock.
 }
 
 // sysCardNote is the note of a settings card that holds a link: the snapshot schedule names the place
