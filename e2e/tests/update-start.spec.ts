@@ -103,6 +103,7 @@ test.describe("in a browser at UTC+5:30", () => {
 
     await goButton(page).click();
     await expect(page).toHaveURL(/\/transactions\/\d+$/);
+    const txnUrl = page.url();
     const row = page.locator(".upd-row").filter({ hasText: "lamp-1m" });
     await expect(row.locator(".upd-row-state")).toContainText("Planned"); // the job waits; it is not "Queued" or "Checking"
     await page.waitForTimeout(3000); // an update that was started at once would have left "Planned" by now
@@ -114,6 +115,14 @@ test.describe("in a browser at UTC+5:30", () => {
     await entry.getByText("Details", { exact: true }).click();
     const planned = new Date(instant).toISOString().replace(".000Z", "Z");
     await expect(entry.locator("xpath=following-sibling::tr[1]")).toContainText(`"start_at": "${planned}"`);
+
+    // Why (#796): the plan holds lamp-1m, and the picker blocks a planned device. The tests below share this app
+    // and need lamp-1m, so this one leaves nothing planned: it cancels its own plan.
+    await page.goto(txnUrl);
+    await page.getByRole("link", { name: /^Cancel TX-/ }).click();
+    await page.locator("#dlg-txn").getByRole("button", { name: "Cancel schedule" }).click();
+    await expect(page).toHaveURL(txnUrl);
+    await expect(row.locator(".upd-row-state")).toHaveText("Cancelled");
   });
 
   // Why: the page calls a typed time past, so the server must refuse it too. If the page posted nothing for it,
