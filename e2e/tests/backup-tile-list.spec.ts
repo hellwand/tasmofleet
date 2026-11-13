@@ -56,8 +56,9 @@ test("the Devices without a backup tile opens exactly those devices", async ({ p
   await page.goto(app.url + "/devices?chip=nobackup");
   await expect(page.locator("table[data-table=devices] tbody tr")).toHaveCount(total - 1);
 
-  // On a phone the chip row is wider than the screen: the active chip must be scrolled into the
-  // row's visible box, or the list looks unfiltered (coordinator review of #408).
+  // On a phone the chip row wraps (#678, it used to be a strip wider than the screen that had to be
+  // scrolled to the active chip, coordinator review of #408): the active chip lies inside the row's box,
+  // in view without a swipe, or the list looks unfiltered.
   await page.setViewportSize({ width: 375, height: 800 });
   await page.goto(app.url + "/devices?chip=nobackup");
   const inside = await page.evaluate(() => {
@@ -65,6 +66,6 @@ test("the Devices without a backup tile opens exactly those devices", async ({ p
     const c = document.querySelector('.dv-chip[aria-current="true"]')!.getBoundingClientRect();
     return { ok: c.left >= row.left - 0.5 && c.right <= row.right + 0.5, scrolled: window.scrollY };
   });
-  expect(inside.ok, "active chip inside the row's visible box at 375").toBe(true);
+  expect(inside.ok, "active chip inside the row's box at 375").toBe(true);
   expect(inside.scrolled, "the page itself did not jump").toBe(0);
 });

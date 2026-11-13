@@ -196,6 +196,45 @@ test("tablet and phone: the devices table and the navigation never scroll sidewa
   }
 });
 
+// #678: the Devices list's filter chips used to sit in one row that scrolled sideways, so on a phone "Not
+// compliant", "No backup" and the Chip and Tag pickers were hidden until the person swiped, and the filter
+// field stopped at 380 px while its line was wider (three quarters of it at 540 px). A person must see every
+// filter without swiping, and the field must use its whole line. 375 and 412 are the phone widths of the
+// report; 540 is where the field's cap shows. On a wide screen (1280) the field stays a field of 380 px, not a
+// bar. The other chip rows (Backups, Policy) keep their strip.
+for (const scheme of ["light", "dark"] as const) {
+  test(`phone: the Devices list's chips wrap inside their row and the filter field fills its line (${scheme})`, async ({ page }) => {
+    await page.emulateMedia({ colorScheme: scheme });
+    await page.setExtraHTTPHeaders(admin);
+    const bad: string[] = [];
+    for (const width of [375, 412, 540, 1280]) {
+      await page.setViewportSize({ width, height: SCREEN });
+      await page.goto(app.url + "/devices");
+      await expect(page.getByRole("link", { name: "lamp-1m", exact: true })).toBeVisible();
+      await page.evaluate(() => document.fonts.ready);
+      const m = await page.evaluate(() => {
+        const row = document.querySelector(".dv-list .dv-chips")!;
+        const box = row.getBoundingClientRect();
+        const outside = [...row.children]
+          .filter((c) => c.getClientRects().length > 0) // the separator is not drawn while the row wraps
+          .map((c) => ({ el: c, r: c.getBoundingClientRect() }))
+          .filter(({ r }) => r.left < box.left - 0.5 || r.right > box.right + 0.5)
+          .map(({ el, r }) => `${(el.textContent || el.className).trim().slice(0, 20)} [${Math.round(r.left)}..${Math.round(r.right)}]`);
+        const tools = document.querySelector(".dv-list .dv-tools")!.getBoundingClientRect();
+        const q = document.querySelector(".dv-list .dv-q")!.getBoundingClientRect();
+        return { row: `[${Math.round(box.left)}..${Math.round(box.right)}]`, outside, scrolls: row.scrollWidth - row.clientWidth, q: q.width, line: tools.width, labels: [...row.children].map((c) => c.textContent ?? "").join("|") };
+      });
+      for (const want of ["Not compliant", "No backup", "Chip", "Tag"]) if (!m.labels.includes(want)) bad.push(`${width}px: the chip row has no "${want}", the guard would measure a shorter row`);
+      if (m.outside.length) bad.push(`${width}px: outside the row ${m.row}: ${m.outside.join(", ")}`);
+      if (m.scrolls > 0) bad.push(`${width}px: the chip row scrolls sideways by ${m.scrolls}px`);
+      if (width < 720) {
+        if (Math.abs(m.q - m.line) > 0.5) bad.push(`${width}px: the filter field is ${m.q}px in a line of ${m.line}px`);
+      } else if (Math.abs(m.q - 380) > 0.5) bad.push(`${width}px: the filter field is ${m.q}px, not its 380px`);
+    }
+    expect(bad, "chips hidden from the person or a filter field short of its line").toEqual([]);
+  });
+}
+
 // Name fits about 22 characters, Vitals takes what is left. Vitals once got
 // squeezed into two lines because Name took the remaining width.
 test("desktop: the devices table keeps Vitals on one line and cells inside their columns", async ({ page }) => {

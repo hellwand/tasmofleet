@@ -9,11 +9,12 @@ import {
   writeTasmoAdminDir,
 } from "../support/stack";
 
-// #116: on a narrow screen the pill row scrolls sideways, and picking from it (the Chip dropdown
-// sits at its far end) reloads the page, which used to put the row back to its start: every pill
-// jumped. At desktop width the row fits and never scrolled. Every pill that was there before the selection must stay where it was
-// (within 1 px), so the user's pointer keeps hitting the pill they meant. UX_SHOTS=<dir> keeps
-// screenshots.
+// #116: picking from the pill row (the Chip dropdown sits at its far end) reloads the page, which used
+// to put the row, then a strip that scrolled sideways on a narrow screen, back to its start: every pill
+// jumped. Since #678 the device list's row wraps instead of scrolling (the strip with its scroll keeping
+// is left to Backups and Policy), so a reload must not move any pill either: they wrap the same way.
+// Every pill that was there before the selection must stay where it was (within 1 px), so the user's
+// pointer keeps hitting the pill they meant. UX_SHOTS=<dir> keeps screenshots.
 const shots = process.env.UX_SHOTS;
 const adam = { "X-authentik-username": "adam", "X-authentik-groups": "adm" };
 let app: App;
@@ -95,11 +96,9 @@ for (const scheme of ["light", "dark"] as const) {
       );
       expect(options.length, "the fleet has chip families").toBeGreaterThan(0);
 
-      // a narrow screen scrolls the pill row; the user picks from the far end (the Chip dropdown)
-      await page.evaluate(() => {
-        const c = document.querySelector(".dv-chips")!;
-        c.scrollLeft = c.scrollWidth;
-      });
+      // the row wraps (#678): nothing to scroll, the Chip dropdown is reachable where it is
+      const scroll = await page.locator(".dv-chips").evaluate((c) => c.scrollWidth - c.clientWidth);
+      expect(scroll, "the pill row does not scroll sideways").toBeLessThanOrEqual(0);
       const before = await pills(page);
       if (shots) {
         mkdirSync(shots, { recursive: true });
@@ -107,8 +106,7 @@ for (const scheme of ["light", "dark"] as const) {
       }
       await Promise.all([
         page.waitForURL(/family=/),
-        // force: Playwright would scroll the row to the select first, which is not what a thumb does
-        family.selectOption(options[0], { force: true }),
+        family.selectOption(options[0]),
       ]);
       await expect(page.locator("select[name=family]")).toHaveValue(options[0]);
       const after = await pills(page);

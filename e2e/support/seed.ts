@@ -130,6 +130,29 @@ export async function seedAuditTail(app: App, count: number): Promise<void> {
   }
 }
 
+/**
+ * seedWifiSamples writes one hourly Wi-Fi signal sample per entry of `dbms` for the device called `name`, the
+ * newest one hour before the current hour and the others an hour apart before it, the way the health loop
+ * stores them (device_wifi_samples, #325). The Stability card draws its 24 h sparkline only from two or more
+ * samples inside the last 24 hours, and a fresh devenv has none, so a guard that measures the sparkline
+ * measures nothing without them. The app only ever writes the current hour, which these never collide with.
+ */
+export async function seedWifiSamples(app: App, name: string, dbms: number[]): Promise<void> {
+  if (dbms.length > 23) throw new Error("seedWifiSamples: the card shows the last 24 hours, at most 23 past hours fit");
+  const { DatabaseSync } = await import("node:sqlite");
+  const db = new DatabaseSync(join(app.dataDir, "tasmofleet.db"));
+  try {
+    db.exec("PRAGMA busy_timeout=5000");
+    const dev = db.prepare("SELECT id FROM devices WHERE name = ?").get(name) as { id: number } | undefined;
+    if (!dev) throw new Error(`seedWifiSamples: no device called ${name}`);
+    const hour = Math.floor(Date.now() / 3_600_000) * 3_600_000;
+    const insert = db.prepare("INSERT OR REPLACE INTO device_wifi_samples (device_id, at, dbm) VALUES (?, ?, ?)");
+    dbms.forEach((dbm, i) => insert.run(dev.id, hour - (dbms.length - i) * 3_600_000, dbm));
+  } finally {
+    db.close();
+  }
+}
+
 /** renamedDevices are simulator devices the seed renames to real-length names (the name the UI shows). */
 export const renamedDevices: Record<string, string> = {
   "sim-02-esp32": "Mr Bambu External Light",

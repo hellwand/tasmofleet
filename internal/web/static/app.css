@@ -8227,7 +8227,6 @@ body:has(.bulkbar:not([hidden]) > .bulk-acts) {
 .dv-q {
   flex: 1 1 180px;
   min-width: 0;
-  max-width: 380px;
   height: var(--ctl);
   padding: 0 10px;
   border: var(--hair-w) solid var(--color-border-strong);
@@ -8242,6 +8241,14 @@ body:has(.bulkbar:not([hidden]) > .bulk-acts) {
   max-width: 100%;
   padding-bottom: 2px;
   overflow-x: auto;
+}
+/* The Devices list shows every filter at once: the chips wrap onto further lines instead of scrolling
+   sideways, so a phone never hides "Not compliant" or the Chip and Tag pickers off its edge (#678).
+   The other chip rows (Backups, Policy) keep the scroll strip above. */
+.dv-list .dv-chips {
+  flex-wrap: wrap;
+  padding-bottom: 0;
+  overflow-x: visible;
 }
 .dv-chip {
   display: inline-flex;
@@ -8273,6 +8280,16 @@ body:has(.bulkbar:not([hidden]) > .bulk-acts) {
   width: 1px;
   margin: 6px 2px;
   background: var(--color-border);
+}
+/* The separator between the chips and the pickers only belongs to a single line: when the Devices list's
+   row wraps it would be left hanging at the end of a line, so it shows only where the row fits (#678). */
+.dv-list .dv-vsep {
+  display: none;
+}
+@media (min-width: 70rem) {
+  .dv-list .dv-vsep {
+    display: block;
+  }
 }
 .dv-pick {
   display: inline-flex;
@@ -8341,6 +8358,10 @@ body:has(.bulkbar:not([hidden]) > .bulk-acts) {
 @media (min-width: 45rem) {
   .dv-tools {
     padding-right: 98px;
+  }
+  /* on a wide screen the field stays a field; a phone gives it its whole line */
+  .dv-q {
+    max-width: 380px;
   }
   .dv-cols {
     display: block;
@@ -15439,7 +15460,6 @@ details.devcard > summary {
 .stab-spark {
   display: block;
   width: 100%;
-  max-width: 240px;
   height: 28px;
 }
 .stab-spark .line {
