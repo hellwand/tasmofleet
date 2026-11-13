@@ -165,7 +165,7 @@ var fields = []Field{
 	{Key: "NOTIFY_UPDATE", Bool: true, Group: GroupNotify, Label: "Update job finished", Apply: Live,
 		Help: "One message per update transaction, not per device."},
 	{Key: "NOTIFY_UPDATE_WHEN", Group: GroupNotify, Label: "Send when", Apply: Live, Enum: config.NotifyChoices("NOTIFY_UPDATE_WHEN"),
-		Help: "any: every finished transaction. problems: only failed or partial ones."},
+		Help: "any: every finished transaction. problems: only failed or partial ones, and a scheduled update that was not started."},
 	{Key: "NOTIFY_BACKUP", Bool: true, Group: GroupNotify, Label: "Scheduled device backup failed", Apply: Live,
 		Help: "One message per scheduled run, listing the devices that failed."},
 	{Key: "NOTIFY_SNAPSHOT", Bool: true, Group: GroupNotify, Label: "Database snapshot failed", Apply: Live,

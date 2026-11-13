@@ -88,7 +88,7 @@ func TestScheduledAndNotStartedJobsReadAsSuch(t *testing.T) {
 		word string
 		tone ui.Tone
 	}{
-		{model.Job{State: model.JobScheduled}, "Scheduled", ui.ToneNeutral},
+		{model.Job{State: model.JobScheduled}, "Planned", ui.ToneNeutral},
 		{model.Job{State: model.JobCancelled, NotStarted: true}, "Not started", ui.ToneWarn},
 		{model.Job{State: model.JobCancelled}, "Cancelled", ui.ToneNeutral},
 	} {

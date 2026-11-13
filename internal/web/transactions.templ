@@ -433,8 +433,9 @@ templ relOption(o ui.Option) {
 // updatePreviewPage is the answer to "Review update" (step 4): what each device gets and what
 // happens, then Start update. It is a page of its own, so it also works without JavaScript.
 templ updatePreviewPage(p previewPage, csrf string) {
-	@ui.PageHeader("New firmware update", "Pick devices and a release, check the plan, then start.")
+	@ui.PageHeader("New firmware update", "Pick devices and a release, check the plan, choose when to start.")
 	<div class="upd-split upd-split-prev">
+		<div class="upd-main">
 		<section class="ulist upd-prev" aria-labelledby="prev-h">
 			<div class="ulist-head">
 				<h2 id="prev-h">4 · Preview · { plural(p.Upgrades(), "device") }</h2>
@@ -520,10 +521,25 @@ templ updatePreviewPage(p previewPage, csrf string) {
 				</div>
 			}
 		</section>
+		@whenCard(p.When)
+		</div>
 		<aside class="ucard upd-aside upd-what" aria-labelledby="what-h">
 			<h2 id="what-h">What happens</h2>
 			<dl class="upd-facts upd-facts-wide">
 				<dt>Target</dt><dd><b>{ p.ReleaseText }</b></dd>
+				<dt>Starts</dt>
+				<dd data-starts>
+					switch p.When.Mode {
+						case "set":
+							<b>{ p.When.StartsText() }</b> · { p.When.StartsIn() }
+						case "past":
+							<span class="upd-warn-text">Not set: the time is in the past</span>
+						case "unset":
+							<span class="upd-warn-text">Not set yet: choose a quick pick or a time</span>
+						default:
+							<b>Now</b> · when you press Start update
+					}
+				</dd>
 				<dt>Devices</dt><dd><b>{ strconv.Itoa(p.Upgrades()) }</b></dd>
 				if p.Refused() > 0 {
 					<dt>Refused</dt><dd class="upd-bad">{ plural(p.Refused(), "device") }</dd>
@@ -553,10 +569,11 @@ templ updatePreviewPage(p previewPage, csrf string) {
 				</dd>
 				<dt>Estimated</dt><dd>{ updateEstimate(p.Upgrades(), p.Parallel) }</dd>
 			</dl>
+			<p class="upd-rule" data-starts-rule data-late={ strconv.Itoa(p.When.LateMinutes()) } hidden?={ !p.When.ShowRule() }><b>If TasmoFleet is down at <span data-clock>{ p.When.RuleClock() }</span>,</b> the update starts as soon as TasmoFleet is back, but only until <span data-deadline>{ p.When.RuleDeadline() }</span> ({ strconv.Itoa(p.When.LateMinutes()) } minutes after the start time). If TasmoFleet is back later than that, the update is not started at all and TasmoFleet sends a notification. Devices are checked again when the update starts.</p>
 			<div class="upd-go">
 				<button type="submit" class="btn btn-tall" form="change">Back</button>
 				if len(p.IDs) > 0 {
-					<button type="submit" class="btn btn-primary btn-tall" form="start">Start update</button>
+					<button type="submit" class="btn btn-primary btn-tall" form="start" data-go>{ p.When.ButtonText() }</button>
 				}
 			</div>
 			if len(p.IDs) == 0 && p.ChoosingBuilds()+p.ChoosingLanguages() > 0 {
@@ -572,6 +589,10 @@ templ updatePreviewPage(p previewPage, csrf string) {
 	</div>
 	<form id="start" method="post" action={ templ.SafeURL(p.Base + "/updates") }>
 		@previewFields(p, csrf, p.IDs, true)
+		for _, id := range p.Picked {
+			<input type="hidden" name="picked" value={ id }/>
+		}
+		<input type="hidden" name="start_at" data-start-at/>
 	</form>
 	<form id="change" method="post" action={ templ.SafeURL(p.Base + "/updates/new") }>
 		@previewFields(p, csrf, p.Picked, false)
@@ -579,6 +600,43 @@ templ updatePreviewPage(p previewPage, csrf string) {
 	<form id="recheck" method="post" action={ templ.SafeURL(p.Base + "/updates/preview") }>
 		@previewFields(p, csrf, p.Picked, false)
 	</form>
+}
+
+// whenCard is "5 · When" of the preview: Start now (the default) or Start at a chosen time with the quick picks
+// and the fields of Other time. Its inputs belong to the form "start", so they travel with Start update.
+// static/updatestart.js recomputes the picks in the browser's zone and keeps the plan's "Starts" row in step.
+templ whenCard(w whenState) {
+	<section class="ucard upd-when" aria-labelledby="when-h">
+		<h2 id="when-h">5 · When</h2>
+		<fieldset class="rcards">
+			<legend class="sr-only">When does the update start?</legend>
+			<label class="rcard"><input type="radio" name="when" id="when-now" value="now" form="start" checked?={ !w.At }/><span class="rcard-body"><b>Start now</b><span>The update starts as soon as you press Start update.</span></span></label>
+			<label class="rcard"><input type="radio" name="when" id="when-at" value="at" form="start" checked?={ w.At }/><span class="rcard-body"><b>Start at a chosen time</b><span>Plan this update for later, for example overnight. It is listed in Transactions until it starts, and you can cancel it there.</span></span></label>
+		</fieldset>
+		<div class="upd-when-at">
+			<fieldset class="upd-picks">
+				<legend>Quick picks</legend>
+				for _, pk := range w.Picks {
+					<label class="chip"><input type="radio" name="at" value={ pk.Value() } form="start" data-kind={ pk.Kind } checked?={ w.Picked == pk.Value() }/><span class="chip-main">{ pk.Label }</span><span class="chip-sub">{ pk.Date() }</span></label>
+				}
+				<label class="chip"><input type="radio" name="at" value="custom" form="start" data-kind="custom" checked?={ w.Picked == "custom" }/><span class="chip-main">Other time</span><span class="chip-sub">Choose below</span></label>
+			</fieldset>
+			<div class="upd-custom">
+				<label>Date<input type="date" name="at_date" form="start" value={ w.Date }
+					if w.Invalid() {
+						aria-invalid="true" aria-describedby="when-err"
+					}
+				/></label>
+				<label>Time<input type="time" name="at_time" form="start" value={ w.Time }
+					if w.Invalid() {
+						aria-invalid="true" aria-describedby="when-err"
+					}
+				/></label>
+			</div>
+			<p class="upd-err" id="when-err" role="alert" data-now={ w.Now.Format("2006-01-02T15:04:05Z07:00") } hidden?={ !w.Invalid() }>{ w.Err }</p>
+			<p class="upd-tz" data-tz>Times are in the server's time zone ({ w.ZoneText() }).</p>
+		</div>
+	</section>
 }
 
 // previewFields carry the choice of the preview to the start or back to the picker. A build that comes

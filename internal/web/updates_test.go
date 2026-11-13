@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/hellwand/tasmofleet/internal/clock"
 	"github.com/hellwand/tasmofleet/internal/firmware"
 	"github.com/hellwand/tasmofleet/internal/fwselect"
 	"github.com/hellwand/tasmofleet/internal/httpx"
@@ -66,9 +67,12 @@ type fakeJobs struct {
 	// (a busy or broken database).
 	listErr func(store.JobFilter) error
 	getErr  error
+	// filters records every filter ListJobs was asked with.
+	filters []store.JobFilter
 }
 
 func (f *fakeJobs) ListJobs(_ context.Context, fl store.JobFilter) ([]model.Job, error) {
+	f.filters = append(f.filters, fl)
 	if f.listErr != nil {
 		if err := f.listErr(fl); err != nil {
 			return nil, err
@@ -80,6 +84,12 @@ func (f *fakeJobs) ListJobs(_ context.Context, fl store.JobFilter) ([]model.Job,
 			continue
 		}
 		if fl.DeviceID != 0 && j.DeviceID != fl.DeviceID {
+			continue
+		}
+		if fl.CreatedBy != "" && j.CreatedBy != fl.CreatedBy {
+			continue
+		}
+		if fl.Scheduled && j.StartAt.IsZero() {
 			continue
 		}
 		if len(fl.States) > 0 && !slices.Contains(fl.States, j.State) {
@@ -140,7 +150,10 @@ func (f *fakeFW) Prune(context.Context, int) (firmware.DeleteResult, error) {
 }
 func (f *fakeFW) Refresh(context.Context) error { f.refreshed = true; return nil }
 
-func setupOTA(t *testing.T) (*env, *fakeOTA, *fakeJobs, *fakeFW) {
+func setupOTA(t *testing.T) (*env, *fakeOTA, *fakeJobs, *fakeFW) { return setupOTAAt(t, nil) }
+
+// setupOTAAt is setupOTA with the handler's clock set (nil: the wall clock).
+func setupOTAAt(t *testing.T, clk clock.Clock) (*env, *fakeOTA, *fakeJobs, *fakeFW) {
 	t.Helper()
 	e := setup(t)
 	// devices: 1 kitchen (esp8266 tasmota), 2 attic (esp32), 3 stuck on minimal
@@ -149,7 +162,7 @@ func setupOTA(t *testing.T) (*env, *fakeOTA, *fakeJobs, *fakeFW) {
 	j := &fakeJobs{jobs: []model.Job{{ID: 1, BatchID: 7, DeviceID: 1, State: model.JobAwaitReboot, TargetRelease: "16.1.0", CreatedAt: time.Now()}}}
 	fw := &fakeFW{}
 	h, err := Handler(Deps{Guard: fakeGuard{}, Inventory: e.inv, Health: e.health, Backups: e.bk, Prober: e.pr, Audit: e.aud, Recorder: e.aud,
-		Hub: e.hub, OTA: o, Jobs: j, Firmware: fw, Batches: fakeBatches{}, BuildMemory: e.inv})
+		Hub: e.hub, OTA: o, Jobs: j, Firmware: fw, Batches: fakeBatches{}, BuildMemory: e.inv, Clock: clk})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -718,7 +731,7 @@ func TestChangeBuildAsksAgainAndKeepsTheMemory(t *testing.T) {
 		t.Fatalf("request %+v, memory %q", o.previewReqs, e.inv.devs[4].BuildMemory)
 	}
 	start, _, _ := strings.Cut(body[strings.Index(body, `<form id="start"`):], "</form>")
-	if !strings.Contains(body, "Choose the build") || strings.Contains(body, " checked") || strings.Contains(start, "build_4") || strings.Contains(body, "remembered from your last update") {
+	if !strings.Contains(body, "Choose the build") || preselected(body) || strings.Contains(start, "build_4") || strings.Contains(body, "remembered from your last update") {
 		t.Fatalf("Change must fall back to the plain choice: %s", body)
 	}
 }
@@ -735,7 +748,7 @@ func TestForgetClearsTheRememberedBuild(t *testing.T) {
 	if e.inv.devs[4].BuildMemory != "" || o.previewReqs[0].Build != "" {
 		t.Fatalf("memory %q, request %+v", e.inv.devs[4].BuildMemory, o.previewReqs)
 	}
-	if strings.Contains(body, "remembered from your last update") || strings.Contains(body, " checked") {
+	if strings.Contains(body, "remembered from your last update") || preselected(body) {
 		t.Fatalf("a forgotten build is still shown or preselected: %s", body)
 	}
 	if !slices.ContainsFunc(e.aud.events, func(ev model.AuditEvent) bool {
@@ -774,7 +787,7 @@ func TestPreviewKeepsAskingWithoutAMemory(t *testing.T) {
 	o.items[4] = ota.PreviewItem{DeviceID: 4, Decision: "refuse", Reason: "select: ESP32-S2 has two builds", BuildChoice: true}
 	form := url.Values{"id": {"4"}, "release": {"16.1.0"}, "policy": {"only-newer"}}
 	_, body := e.do(t, "POST", "/updates/preview", "operator", form)
-	if o.previewReqs[0].Build != "" || !strings.Contains(body, "Choose the build") || strings.Contains(body, " checked") || strings.Contains(body, "remembered") {
+	if o.previewReqs[0].Build != "" || !strings.Contains(body, "Choose the build") || preselected(body) || strings.Contains(body, "remembered") {
 		t.Fatalf("without a memory the choice must be asked: %+v %s", o.previewReqs, body)
 	}
 	e.do(t, "POST", "/updates", "operator", form)
@@ -860,4 +873,14 @@ func TestForgetWithoutAMemoryIsNotAudited(t *testing.T) {
 	if slices.ContainsFunc(e.aud.events, func(ev model.AuditEvent) bool { return ev.Action == "device.build_forgotten" }) {
 		t.Fatalf("an empty Forget was audited: %+v", e.aud.events)
 	}
+}
+
+// preselected reports whether the page checks an input other than "Start now" of the "When" card, which is
+// checked by design; the tests that call it look for a build the page preselected.
+func preselected(body string) bool {
+	if i := strings.Index(body, `<section class="ucard upd-when"`); i >= 0 {
+		j := strings.Index(body[i:], "</section>")
+		body = body[:i] + body[i+j:]
+	}
+	return regexp.MustCompile(`<input[^>]* checked[ >/]`).MatchString(body)
 }

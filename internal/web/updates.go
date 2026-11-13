@@ -647,6 +647,7 @@ type previewPage struct {
 	// RememberedIDs are the devices whose entry in Builds comes from the memory (not from the person).
 	RememberedIDs map[string]bool
 	Languages     map[string]string // device id -> the language build the user said (rows that go ahead only)
+	When          whenState         // the "When" card and the plan's "Starts" row
 	IDs           []string          // the devices the update starts on
 	Picked        []string          // every device the user picked (the way back to the picker)
 	Error         string
@@ -696,6 +697,12 @@ func (h *handler) updatePreview(w http.ResponseWriter, r *http.Request) {
 		h.fail(w, r, err)
 		return
 	}
+	h.showPreview(w, r, parseStart(nil, h.d.Clock.Now()), http.StatusOK)
+}
+
+// showPreview answers with the preview of the posted devices and options (r is parsed). when is the state of
+// the "When" card: the default "Start now" for a fresh preview, or the refused choice of "Start update".
+func (h *handler) showPreview(w http.ResponseWriter, r *http.Request, when whenState, status int) {
 	ids := h.formIDs(r)
 	skipMemory, ok := h.buildAnswers(w, r, ids)
 	if !ok {
@@ -809,8 +816,25 @@ func (h *handler) updatePreview(w http.ResponseWriter, r *http.Request) {
 		}
 		p.Rows = append(p.Rows, row)
 	}
+	p.When = when
+	p.When.Picks = h.startPicksFor(r, when.Now)
 	v := h.view(r, "New update", "updates", nil)
-	h.show(w, r, http.StatusOK, "updates_preview", v, updatePreviewPage(p, v.CSRF))
+	h.show(w, r, status, "updates_preview", v, updatePreviewPage(p, v.CSRF))
+}
+
+// startPicksFor are the quick picks for this person: "Like last time" repeats the weekday and time of the start
+// they chose last, taken from their own newest job that was given a start time.
+func (h *handler) startPicksFor(r *http.Request, now time.Time) []startPick {
+	var last time.Time
+	if h.d.Jobs != nil {
+		jobs, err := h.d.Jobs.ListJobs(r.Context(), store.JobFilter{CreatedBy: actor(r), Scheduled: true, Limit: 1})
+		if err != nil {
+			h.log.WarnContext(r.Context(), "last scheduled start for the quick picks", "err", err) // no suggestion; the other picks stay
+		} else if len(jobs) > 0 {
+			last = jobs[0].StartAt
+		}
+	}
+	return startPicks(now, last)
 }
 
 // updateAPIOff names the selected devices whose HTTP API is off and which nothing else can update (#447), with
@@ -839,9 +863,29 @@ func (h *handler) updateSubmit(w http.ResponseWriter, r *http.Request) {
 		h.message(w, r, http.StatusConflict, h.view(r, "Update refused", "updates", "Nothing was started. "+apiOff))
 		return
 	}
+	when := parseStart(r.PostForm, h.d.Clock.Now())
+	if when.Err != "" {
+		// Nothing starts on a time the person did not mean: the preview comes back with their choice kept.
+		if picked := r.PostForm["picked"]; len(picked) > 0 {
+			r.PostForm["id"] = picked // the devices the preview showed, also those it did not take along
+		}
+		// Start posts a remembered build only so that it flashes what the screen showed. Drawn again, that echo is
+		// not the person's own pick: without it the row stays remembered, with Change and Forget (#186).
+		for _, id := range h.formIDs(r) {
+			k := "build_" + strconv.FormatInt(int64(id), 10)
+			if d, err := h.d.Inventory.Get(r.Context(), id); err == nil && d.BuildMemory != "" && r.PostForm.Get(k) == d.BuildMemory {
+				delete(r.PostForm, k)
+			}
+		}
+		h.showPreview(w, r, when, http.StatusUnprocessableEntity)
+		return
+	}
 	reqs, err := h.requests(r, h.formIDs(r))
 	if err == nil && len(reqs) == 0 {
 		err = errors.New("nothing to update")
+	}
+	for i := range reqs {
+		reqs[i].StartAt = when.Start // one start for the whole transaction; zero starts at once
 	}
 	var id model.BatchID
 	if err == nil {
@@ -863,9 +907,13 @@ func (h *handler) updateSubmit(w http.ResponseWriter, r *http.Request) {
 	case err != nil:
 		h.message(w, r, http.StatusUnprocessableEntity, h.view(r, "Update not started", "updates", err.Error()))
 	default:
-		h.recordFirmware(r, "transaction.start", "transaction:"+strconv.FormatInt(int64(id), 10), map[string]any{
+		detail := map[string]any{
 			"devices": len(reqs), "release": reqs[0].Release, "variant": reqs[0].Variant, "policy": string(reqs[0].Policy),
-		}, "ok")
+		}
+		if !when.Start.IsZero() {
+			detail["start_at"] = when.Start.UTC().Format(time.RFC3339)
+		}
+		h.recordFirmware(r, "transaction.start", "transaction:"+strconv.FormatInt(int64(id), 10), detail, "ok")
 		h.auditCustomUse(r, id, reqs)
 		h.rememberBuilds(r, reqs)
 		redirect(w, r, "/transactions/"+strconv.FormatInt(int64(id), 10))
@@ -921,6 +969,9 @@ func (h *handler) jobViews(r *http.Request, f store.JobFilter) ([]jobView, bool,
 	for _, j := range jobs {
 		v := jobView{Job: j, Device: names[j.DeviceID], FromVersion: versions[j.DeviceID], Active: !j.State.Terminal(), Base: httpBase(r)}
 		v.Step, v.StepLabel = jobStep(j.State, j.Stage)
+		if j.NotStarted {
+			v.StepLabel = "Not started" // nobody cancelled it: its start time passed while TasmoFleet was down (#603)
+		}
 		switch {
 		case j.IsPolicy(), j.IsTemplate():
 			v.Step, v.StepLabel = policyStep(j.State)

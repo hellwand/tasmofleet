@@ -94,7 +94,7 @@ func jobBadge(j model.Job) (string, ui.Tone) {
 	}
 	switch j.State {
 	case model.JobScheduled:
-		return "Scheduled", ui.ToneNeutral // waits for its start time (#603), not queued for a slot
+		return "Planned", ui.ToneNeutral // waits for its start time (#603), not queued for a slot; the transaction as a whole reads "Scheduled"
 	case model.JobQueued:
 		return "Queued", ui.ToneNeutral
 	case model.JobPreflight:

@@ -10370,6 +10370,121 @@ nav.crumbs a {
 .upd-go .btn-primary {
   flex: 1;
 }
+/* update preview: the devices and the "5 · When" card in one column, "What happens" beside it (#604) */
+.upd-main {
+  flex: 3 1 520px;
+  min-width: 0;
+  max-width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-14);
+}
+.upd-main .upd-prev {
+  flex: none;
+  width: 100%;
+}
+.upd-when .rcard-body span {
+  margin-top: var(--sp-2);
+}
+.upd-when-at {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-12);
+  padding: var(--sp-12) var(--sp-14);
+  border: var(--hair-w) solid var(--color-border);
+  border-radius: var(--r-banner);
+  background: var(--color-surface-2);
+}
+/* "Start now" hides the choices; without JavaScript this is all that reacts to the radio */
+.upd-when:not(:has(#when-at:checked)) .upd-when-at {
+  display: none;
+}
+.upd-picks {
+  margin: 0;
+  padding: 0;
+  border: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-8);
+}
+.upd-picks legend {
+  margin: 0 0 var(--sp-6);
+  padding: 0;
+  font: 500 12.5px var(--font-sans);
+  color: var(--color-text-2);
+}
+.upd-picks label.chip {
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0;
+  padding: var(--sp-6) var(--sp-12);
+  min-height: 44px;
+  justify-content: center;
+}
+.upd-picks label.chip > input {
+  position: absolute;
+  opacity: 0;
+  pointer-events: none;
+}
+.upd-picks .chip-main {
+  font-size: 13.5px;
+  font-weight: 500;
+}
+.upd-picks .chip-sub {
+  font-size: 12px;
+  font-weight: 400;
+  color: var(--color-text-2);
+}
+.upd-picks label.chip:has(input:checked) .chip-sub {
+  color: var(--color-accent-fg);
+}
+.upd-custom {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-10) var(--sp-14);
+  align-items: flex-end;
+}
+.upd-custom label {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-4);
+  font-size: 12.5px;
+  color: var(--color-text-2);
+}
+.upd-custom input {
+  min-width: 150px;
+}
+.upd-custom input[aria-invalid="true"] {
+  border-color: var(--color-danger);
+}
+.upd-tz {
+  margin: 0;
+  font-size: 12.5px;
+  color: var(--color-text-2);
+}
+.upd-err {
+  margin: 0;
+  font-size: 12.5px;
+  font-weight: 500;
+  color: var(--color-danger-fg);
+}
+.upd-warn-text {
+  color: var(--color-warn-fg);
+}
+/* what happens when TasmoFleet is down at the start time, in the plan */
+.upd-rule {
+  margin: 0;
+  padding: var(--sp-10) var(--sp-12);
+  border-radius: var(--r-banner);
+  background: var(--color-surface-2);
+  border: var(--hair-w) solid var(--color-border);
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--color-text);
+}
+.upd-rule b {
+  font-weight: 600;
+}
 /* the cancel dialog's scrim covers the scrollbar gutter too, like the drawer's (F3) */
 html:has(dialog#dlg-txn:modal) {
   background: color-mix(in srgb, var(--color-bg) 50%, rgb(10, 14, 18));
