@@ -14,6 +14,7 @@
 #   image           build and push :edge (_image.yml, mode edge)
 #   ha-app          build-test the HA app image (_ha-app.yml); a failure never stops :edge
 #   ghcr-cleanup    prune the registries after the image, whatever its result
+#   cache-prune     delete the Go caches of main that a newer one supersedes, after the saving jobs (#692)
 name: main
 
 on:
@@ -93,3 +94,18 @@ jobs:
     secrets:
       DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
       DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+
+  # Keeps the newest Go cache of each series on main (#692). A later job: actions/cache saves in the post step of
+  # `checks`, so nothing inside it can delete the entry it replaces. The grant is repeated here because a called
+  # workflow cannot hold more than its caller gives it.
+  cache-prune:
+    name: cache-prune
+    needs: checks
+    # Whatever the checks' result: a job that failed or was cancelled saves nothing (actions/cache post-if: success()), but its siblings that passed have saved, and the older entries go either way; the prune is idempotent.
+    if: ${{ always() }}
+    permissions:
+      contents: read
+      actions: write
+    uses: ./.github/workflows/cache-prune.yml
+    with:
+      dry-run: false

@@ -9,6 +9,9 @@
 # and to the default branch only, so one saved under refs/pull/N/merge, a tag or a
 # feature branch is never restored by anything else and only pushes main's caches out
 # of the 10 GB the repository gets (#476). Pull requests and tags restore main's.
+#
+# Nothing here deletes the entries that a new one supersedes: the cache is saved in the post step at the end
+# of the job, after every step of this action. cache-prune.yml does it in a job after the saving jobs (#692).
 name: go
 description: setup-go with a per-job GOCACHE/GOMODCACHE cache
 inputs:

@@ -116,6 +116,20 @@ means nothing stops you: you have to know it. The full working rules are in
 - **Enforced:** `.github/actions/go/action.yml` and the `save:` inputs of the
   workflows.
 
+### Superseded Go caches filled the 10 GB limit (#692)
+
+- **Happened:** the key of a Go cache carries the commit, so every run on `main` saved a new entry and nothing removed
+  the old ones. Four runs in 25 minutes put the repository at 13.9 GB of 10. The floating `go 1.27` then moved from
+  1.27.3 to 1.27.4, the Go version is part of the key, and a whole series (about 5 GB) that nothing could restore stayed
+  next to the live one until GitHub's eviction took it, together with caches still in use.
+- **Rule:** a cache that gets a new key per run needs a prune at the cause. It runs in a job after the jobs that save
+  (`actions/cache` saves in its post step, so a cleanup step inside the saving job runs before the new entry exists) and
+  groups by series without the Go version and the `go.sum` hash. Keep the newest entry of `refs/heads/main` per series,
+  list first and delete by id (`gh cache list --key` is a prefix match, the delete call an exact key), and give the
+  job `actions: write` in the caller as well as in the called workflow.
+- **Enforced:** `scripts/prune-go-caches.test.mjs` (the selection); `.github/workflows/cache-prune.yml` runs after
+  `main.yml`, `nightly.yml` and `weekly.yml`. Only entries of `refs/heads/main` are listed and deleted; a manual dispatch of the nightly or weekly run only previews.
+
 ### Checks that did not gate the merge (#482, #522)
 
 - **Happened:** the docs link check ran as a separate workflow, and the PR image
