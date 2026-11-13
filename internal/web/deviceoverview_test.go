@@ -530,6 +530,43 @@ func TestOverviewShowsSensorsOnlyWithoutRelays(t *testing.T) {
 	}
 }
 
+// Why: the dim on an offline device says "this is the last reported value" (#145). The
+// Reachability tile is the exception: its "Offline" is the current state, not a stale reading, and
+// at opacity .55 it falls to about 2.6:1 (light) and 3.5:1 (dark), below the design system's AA
+// rule (#513). Every other tile, and the relay box, keeps the dim (#676).
+func TestOfflineDeviceDimsItsTilesButNotReachability(t *testing.T) {
+	e := setupWith(t, func(d *Deps) {
+		d.Health.(fakeHealth)[1] = model.Health{DeviceID: 1, State: model.HealthOffline, LastSeen: time.Now().Add(-5 * time.Hour), Since: time.Now().Add(-5 * time.Hour), Power: map[string]string{"POWER": "OFF"}}
+	})
+	tags := func(body string) map[string]string {
+		got := map[string]string{}
+		for _, m := range regexp.MustCompile(`<div class="(dev-tile[^"]*)" data-tile="(\w+)"[^>]*>`).FindAllStringSubmatch(body, -1) {
+			got[m[2]] = m[0]
+		}
+		return got
+	}
+	_, off := e.do(t, "GET", "/devices/1", "admin", nil)
+	tiles := tags(off)
+	reach, ok := tiles["reach"]
+	if !ok || len(tiles) < 2 {
+		t.Fatalf("the offline page needs the Reachability tile and at least one other: %v", tiles)
+	}
+	if strings.Contains(reach, "is-dim") || strings.Contains(reach, `aria-disabled="true"`) {
+		t.Errorf("Reachability shows the current state and must not be dimmed or disabled: %s", reach)
+	}
+	if !strings.Contains(off, `>Offline</div>`) {
+		t.Error("the Reachability tile says Offline")
+	}
+	for key, tag := range tiles {
+		if key != "reach" && (!strings.Contains(tag, "is-dim") || !strings.Contains(tag, `aria-disabled="true"`)) {
+			t.Errorf("tile %q keeps the offline dim: %s", key, tag)
+		}
+	}
+	if !strings.Contains(off, `class="devcard dev-box dev-dim is-dim"`) {
+		t.Error("the relay box keeps the offline dim")
+	}
+}
+
 // Why: this is the shape a real multi-channel meter reports (and the simulator, from the fleet's
 // captures): Power as an array, one value per channel, but Today, Yesterday and Total once, summed
 // over the channels. The scalar counters are not a fifth channel: counting them as one made a

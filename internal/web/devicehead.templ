@@ -271,8 +271,11 @@ func toneClass(t ui.Tone) string {
 	return "t-" + string(t)
 }
 
+// liveTile is one tile of the live region. Offline dims it (the last reported state), except
+// Reachability: its "Offline" is the current state, and the dim would push it below the AA
+// contrast rule (#676, #513).
 templ liveTile(t tile, l liveView) {
-	<div class={ "dev-tile", dimClass(l.Off) } data-tile={ t.Key } data-dim aria-disabled={ ariaBool(l.Off) }>
+	<div class={ "dev-tile", dimClass(tileDim(t, l)) } data-tile={ t.Key } data-dim aria-disabled={ ariaBool(tileDim(t, l)) }>
 		<div class="dev-tile-l">{ t.Label }</div>
 		<div class={ "dev-tile-v", toneClass(t.Tone) } data-visual-mask?={ t.Mask }>{ t.Value }</div>
 		if t.Bar > 0 {

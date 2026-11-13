@@ -12,4 +12,4 @@ layout and states, not final pixels; the issue has the rules.
 | 5 | 4 relays, no energy meter, Ethernet | [device-overview-5.png](device-overview-5.png) |
 | 6 | Sensors only, no relay | [device-overview-6.png](device-overview-6.png) |
 | 7 | HTTP only (no MQTT), one policy rule failing | [device-overview-7.png](device-overview-7.png) |
-| 8 | Offline: last reported state dimmed, device actions disabled, Edit/Delete/Activity active | [device-overview-8.png](device-overview-8.png) |
+| 8 | Offline: last reported state dimmed, Reachability shows the current state undimmed, device actions disabled, Edit/Delete/Activity active | [device-overview-8.png](device-overview-8.png) |
