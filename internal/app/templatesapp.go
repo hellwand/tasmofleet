@@ -8,5 +8,5 @@ func (a *runtime) templateApplier() ota.TemplateApplier {
 	if a.templates == nil {
 		return nil
 	}
-	return a.templates.NewApplier()
+	return forgetTemplateApplier{TemplateApplier: a.templates.NewApplier(), written: a.settingsWritten} // the Template command writes settings (#676)
 }

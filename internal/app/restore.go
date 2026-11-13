@@ -25,19 +25,26 @@ func (a *runtime) setupRestore() error {
 	if n > 0 {
 		a.log.Warn("restores interrupted by the restart were marked failed", "count", n)
 	}
-	m, err := restore.New(restore.Options{
-		Devices: a.svc.Store, Backups: a.backups, Files: a.backups, Store: a.svc.Store, Client: a.svc.Client,
-		Uploader: a.svc.Router, PathFor: a.restorePath, BrokerPassword: func() string { return a.svc.Sys.Snapshot().MQTTPassword }, Audit: a.svc.Audit, Log: a.log, Context: a.bgContext,
-		Locks: a.deviceLocks(), Jobs: a.svc.Store,
-		Acquire:  deviceGuard{locks: a.deviceLocks()}.acquire, // a person's operation: waits for the background read (#670)
-		Hardware: a.svc.Store, Describe: a.svc.Prober.Describe,
-	})
+	m, err := restore.New(a.restoreOptions())
 	if err != nil {
 		return err
 	}
 	a.restore = m
 	a.goBG("restore", func() error { <-a.bgContext.Done(); m.Wait(); return nil })
 	return nil
+}
+
+// restoreOptions is what the restore service is built from. Its device writes (the restore upload, the MQTT
+// FileUpload, the takeover of an entry by new hardware) go through the wrappers that tell the Settings
+// service what they wrote (#676).
+func (a *runtime) restoreOptions() restore.Options {
+	return restore.Options{
+		Devices: a.svc.Store, Backups: a.backups, Files: a.backups, Store: a.svc.Store, Client: a.restoreClient(a.svc.Client),
+		Uploader: a.restoreUploader(a.svc.Router), PathFor: a.restorePath, BrokerPassword: func() string { return a.svc.Sys.Snapshot().MQTTPassword }, Audit: a.svc.Audit, Log: a.log, Context: a.bgContext,
+		Locks: a.deviceLocks(), Jobs: a.svc.Store,
+		Acquire:  deviceGuard{locks: a.deviceLocks()}.acquire, // a person's operation: waits for the background read (#670)
+		Hardware: a.restoreHardware(a.svc.Store), Describe: a.svc.Prober.Describe,
+	}
 }
 
 // restorePath is transport.Choose's verdict for a restore of d: HTTP (restore upload), MQTT (FileUpload)

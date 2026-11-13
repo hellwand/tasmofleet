@@ -69,6 +69,9 @@ func (u updatePaths) UpdatePath(ctx context.Context, d model.Device, q ota.PathQ
 	return transport.Choose(f), nil
 }
 
+// newOTAEngine is ota.NewEngine; a test swaps it to see what setupOTA hands the engine (#676).
+var newOTAEngine = ota.NewEngine
+
 // setupOTA builds the OTA engine. It needs the firmware cache, which exists
 // only with FIRMWARE_BASE_URL; without it OTA is disabled and the UI hides it.
 func (a *runtime) setupOTA() {
@@ -77,11 +80,11 @@ func (a *runtime) setupOTA() {
 	}
 	cfgM := ota.DefaultConfig()
 	cfgM.RestoreOtaURL = a.cfg.OTARestoreURL
-	a.engine = ota.NewEngine(
+	a.engine = newOTAEngine(
 		ota.Options{Machine: cfgM, MaxParallel: a.cfg.OTAParallel, Audit: a.svc.Audit, Policy: a.policyApplier(), Templates: a.templateApplier(),
 			Commands: a.deviceCmd, Principals: principalResolver{local: a.svc.Store, dir: a.svc.Store}, Paths: a.updatePaths(),
 			HoldFlashing: a.holdFlashing, StartCheck: a.otaStartCheck()},
-		a.svc.Store, a.svc.Store, ota.NewDeviceAPI(a.svc.Client), a.cache, a.backups, clock.Real{}, jobNotifier{rt: a},
+		a.svc.Store, a.svc.Store, a.otaDeviceAPI(), a.cache, a.backups, clock.Real{}, jobNotifier{rt: a},
 	)
 	if a.templates != nil {
 		a.templates.SetEngine(a.engine)
