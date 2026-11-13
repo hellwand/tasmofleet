@@ -382,14 +382,11 @@
       }
       p.push(w);
     });
-    // twice: a column set to pixels takes width from the percentage columns, a pinned one among them too
-    for (var pass = 0; pass < 2; pass++) {
-      idx.forEach(function (p) {
-        if (p[2] > th[p[0]].getBoundingClientRect().width) {
-          p[1].setAttribute("width", String(Math.ceil(p[2])));
-        }
-      });
-    }
+    // The minimum width first, then the pinned columns are measured against it (#806). A table that a
+    // list update has just swapped in has none yet and lies at the frame's width: measured there, its
+    // pinned shares looked too narrow and got pixel widths, the minimum width then made the table wider,
+    // and the next fit (at settle) gave the shares back. Two layouts per update, one painted frame each.
+    // Measured at the width it keeps, a second fit finds the same widths as the first.
     var need = 0;
     all.forEach(function (p) {
       var pinnedTo = idx.filter(function (q) {
@@ -399,6 +396,14 @@
     });
     need = Math.max(need, Number(table.getAttribute("data-basew")) || 0);
     table.style.minWidth = need + "px";
+    // twice: a column set to pixels takes width from the percentage columns, a pinned one among them too
+    for (var pass = 0; pass < 2; pass++) {
+      idx.forEach(function (p) {
+        if (p[2] > th[p[0]].getBoundingClientRect().width) {
+          p[1].setAttribute("width", String(Math.ceil(p[2])));
+        }
+      });
+    }
   }
 
   // The default layout of a table with pixel column widths (no saved layout, so no tfix): a pinned
@@ -772,6 +777,8 @@
   // A swap replaces the table and its resize handles: keep the layout the user just set
   // (unless the server already had it when the update was requested) and the handle focus.
   var heldHandle = null;
+  // the column drag in progress ({key, apply(table)}): a swap mid-drag lays the new table out with it
+  var resizing = null;
   // beforeSend cannot be cancelled (beforeRequest can, and then no afterRequest follows); the
   // xhr's own loadend fires after the swap for load, error, abort and timeout alike, even when
   // the requesting element has left the page (afterRequest would not reach document then)
@@ -784,9 +791,25 @@
       });
     }
   });
+  // A list update replaces the whole table, its scroll frame included, and a new frame starts at the
+  // left edge: the columns the person had scrolled to were gone on every device event (#806). The
+  // position is kept per table and put back once the new table has its widths (the frame's range).
+  var keptScroll = null;
   document.addEventListener("htmx:beforeSwap", function (e) {
     var a = document.activeElement,
       t = e.detail && e.detail.target;
+    keptScroll = null;
+    if (t instanceof Element) {
+      t.querySelectorAll(".tablescroll > table[data-table]").forEach(
+        function (table) {
+          if (table.parentElement.scrollLeft > 0) {
+            keptScroll = keptScroll || { target: t, left: {} };
+            keptScroll.left[table.getAttribute("data-table")] =
+              table.parentElement.scrollLeft;
+          }
+        },
+      );
+    }
     var table =
       a &&
       a.classList &&
@@ -810,6 +833,13 @@
       function (table) {
         var key = keyOf(table),
           rec = recent[key];
+        if (resizing && resizing.key === key) {
+          // mid-drag: the new table is drawn at the widths being dragged, not the server's until the
+          // pointer moves again (#806)
+          resizing.apply(table);
+          laidOut.push(table);
+          return;
+        }
         if (!rec) {
           return;
         }
@@ -840,8 +870,25 @@
         fitSwapped(table);
       }
     });
+    restoreScroll(t);
     restoreHandleFocus();
   });
+  // after the fit: the frame's scroll range is the table's width, which the fit sets
+  function restoreScroll(t) {
+    var kept = keptScroll;
+    keptScroll = null;
+    if (!kept || kept.target !== t) {
+      return;
+    }
+    t.querySelectorAll(".tablescroll > table[data-table]").forEach(
+      function (table) {
+        var left = kept.left[table.getAttribute("data-table")];
+        if (left) {
+          table.parentElement.scrollLeft = left;
+        }
+      },
+    );
+  }
   function fitSwapped(table) {
     fitPinned(table);
     stick(table);
@@ -1082,14 +1129,26 @@
         table
       );
     };
+    var dx = 0;
+    var drag = {
+      key: keyOf(table),
+      apply: function (t) {
+        setWidths(t, snap, idx, dx);
+      },
+    };
+    resizing = drag;
     var move = function (ev) {
       if (ev.pointerId === e.pointerId) {
-        setWidths(live(), snap, idx, ev.clientX - x0);
+        dx = ev.clientX - x0;
+        setWidths(live(), snap, idx, dx);
       }
     };
     var up = function (ev) {
       if (ev.pointerId !== e.pointerId) {
         return;
+      }
+      if (resizing === drag) {
+        resizing = null;
       }
       window.removeEventListener("pointermove", move);
       window.removeEventListener("pointerup", up);
