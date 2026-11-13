@@ -8,6 +8,7 @@
 #   quarantine      the tests tagged @quarantine / quarantine.Test, with retries; never blocking
 #   ha-app          the Home Assistant app in a real Supervisor (#442)
 #   ghcr-cleanup    prune the registries (a manual run only previews: dry-run)
+#   cache-prune     delete the Go caches of main that a newer one supersedes, after the jobs that save (#692)
 #
 # The full mutation run is not part of it: weekly.yml runs it once a week (#480, #555). The jobs
 # also save the Go caches that pull requests restore (from main only, see
@@ -145,13 +146,27 @@ jobs:
       DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
       DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
 
+  # Keeps the newest Go cache of each series on main (#692). The nightly saves lint, test, integration, e2e,
+  # catalogue (checks) and race-0/race-1 (race); a later job, because the caches are saved when their job ends.
+  # Deletes only when the schedule started the run; a manual run, possibly from a branch, only previews.
+  cache-prune:
+    name: cache-prune
+    needs: [checks, race]
+    if: ${{ always() }}
+    permissions:
+      contents: read
+      actions: write
+    uses: ./.github/workflows/cache-prune.yml
+    with:
+      dry-run: ${{ github.event_name != 'schedule' }}
+
   # The nightly blocks no release, so its failure must not go unseen: one open issue
   # "Nightly FULL failed ..." (labels ci, flaky) collects the runs; a later failing night
   # comments on it instead of opening a second one. The body lists the failed tests and the commits
   # since the last green night (_failure-issue.yml).
   nightly-failure-issue:
     name: nightly failure issue
-    needs: [checks, race, ha-app, ghcr-cleanup]
+    needs: [checks, race, ha-app, ghcr-cleanup, cache-prune]
     # Only the scheduled run on main reports; a manual run, from any branch, never touches the issue.
     if: ${{ failure() && github.event_name == 'schedule' && github.ref == 'refs/heads/main' }}
     permissions:

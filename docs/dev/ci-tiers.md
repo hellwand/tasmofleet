@@ -10,13 +10,13 @@ SAFETY package, catalogue, image paths). Every gate runs through the Makefile.
 | File                                                        | Trigger                                    | Runs                                                                                                                                                                                                                 |
 | ----------------------------------------------------------- | ------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `pr.yml`                                                    | `pull_request`                             | FAST: `changes`, `checks` (with diff coverage on SAFETY PRs and the revert check), link check, migration and release section guards, image build check (gates the merge) and HA app image (does not), **`required`** |
-| `main.yml`                                                  | push to `main`                             | lint, unit and integration tests, build (no e2e; saves the Go caches), `:edge` image and (apart from it) HA app image, then `ghcr-cleanup`                                                                           |
+| `main.yml`                                                  | push to `main`                             | lint, unit and integration tests, build (no e2e; saves the Go caches), `:edge` image and (apart from it) HA app image, then `ghcr-cleanup` and `cache-prune`                                                                           |
 | `release.yml`                                               | tag `v*`                                   | `guards` (incl. green `required` + `main.yml` of the SHA), then `publish` (image), `release`, `pages`; no checks. Dispatch = dry run                                                                                 |
-| `nightly.yml`                                               | cron 22:37 UTC, `workflow_dispatch`        | FULL: `checks` (e2e all, `-count=1`, catalogue), `race`, `quarantine`, `ha-app`, `ghcr-cleanup`                                                                                                                      |
-| `weekly.yml`                                                | cron Sunday 21:13 UTC, `workflow_dispatch` | the full `mutation` run (all MUTATION packages) and its gate, the only place mutation runs                                                                                                                           |
+| `nightly.yml`                                               | cron 22:37 UTC, `workflow_dispatch`        | FULL: `checks` (e2e all, `-count=1`, catalogue), `race`, `quarantine`, `ha-app`, `ghcr-cleanup`, `cache-prune`                                                                                                                      |
+| `weekly.yml`                                                | cron Sunday 21:13 UTC, `workflow_dispatch` | the full `mutation` run (all MUTATION packages) and its gate, the only place mutation runs; then `cache-prune`                                                                                                                           |
 | `_checks.yml`, `_mutation.yml`, `_image.yml`, `_ha-app.yml` | `workflow_call` only                       | the shared jobs; the caller's `with:` says which (inputs `e2e`, `e2e_shards`, `testflags`, `safety_race`, `diff_cover`, `revert_check`, `catalogue`, `scope`, `mode`)                                                |
 | `_failure-issue.yml`                                        | `workflow_call` only                       | the issue for a failed scheduled run: failed jobs, failed tests, commits since the last green run                                                                                                                    |
-| `ghcr-cleanup.yml`, `pages.yml`                             | `workflow_call`, `workflow_dispatch`       | registry pruning (manual run: dry-run preview), the website and the demo                                                                                                                                                        |
+| `ghcr-cleanup.yml`, `cache-prune.yml`, `pages.yml`          | `workflow_call`, `workflow_dispatch`       | registry pruning and Go cache pruning (manual run: dry-run preview), the website and the demo                                                                                                                                                        |
 
 - **FAST** (`pr.yml`; `required` must be green to merge, target ≤ 5 min):
   lint, unit and integration tests, build, and the `@core` e2e tests in two shards plus the MQTT specs in a job of their own.
@@ -29,6 +29,16 @@ SAFETY package, catalogue, image paths). Every gate runs through the Makefile.
   are not retested: their results come from the cache that `main.yml` saves. Only runs on `main` save caches (`main.yml`,
   `nightly.yml`, `weekly.yml`; the Go caches, the npm and Tasmota-source caches alike): a cache saved by a PR or a tag run
   can be restored by nothing else and only evicts main's (#476).
+  The key carries the commit, so every saving run on `main` writes a new entry, and a new Go version or `go.sum`
+  hash starts a series that the restore keys of the next run cannot reach; the floating `go 1.27` moving from 1.27.3 to
+  1.27.4 left a whole dead series next to the live one (#692). `cache-prune.yml` deletes them: a job of its own after the
+  jobs that save (`needs`, `if: always()`, in `main.yml`, `nightly.yml` and `weekly.yml`), because `actions/cache` saves in the
+  post step of its job and a step inside it would run before the new entry exists. A series is `go-<name>-<os>-` without the
+  Go version and the `go.sum` hash (`go-race-0` and `go-race-1` are two); only `refs/heads/main` is looked at, the newest entry
+  by `created_at` stays and the rest is deleted by id (`scripts/prune-go-caches.mjs`, with tests). The caller job grants
+  `actions: write` itself, because a called workflow cannot hold more than its caller gives it. A Go version change still
+  starts the next run cold, once. Buildkit blobs, CodeQL databases and the npm and Tasmota-source caches are not Go caches and
+  are not touched. Check the effect with `gh api repos/hellwand/tasmofleet/actions/cache/usage`.
 - **Push to `main`** (`main.yml`): lint, unit and integration tests and the build, but no e2e: `main` moves only by a
   fast-forward push of a PR head that was green, so the e2e shards would repeat the PR (#478). The tests run, cacheable, so
   that main's go test cache holds their results for the PRs and tags (the nightly runs `-count=1` and stores none); the
@@ -40,7 +50,7 @@ SAFETY package, catalogue, image paths). Every gate runs through the Makefile.
   tests and the build on `main` (`main.yml`); running them again on identical code only delayed the image. Job `guards` fails at once, with the reason, when the
   tag is not on `main`, has no `CHANGELOG.md` section, is a patch tag that changes a migration, edits a migration of the previous tag,
   or when its commit lacks a successful `required` check run of `pr.yml` or a successful `main.yml` run (`tools/release-green.sh`;
-  only `ghcr-cleanup` and `ha-app` may fail there). Only the head of a push to `main` gets a `main.yml` run, and a push that changes only
+  only `ghcr-cleanup`, `cache-prune` and `ha-app` may fail there). Only the head of a push to `main` gets a `main.yml` run, and a push that changes only
   paths `main.yml` ignores gets none: tag the head of the push that carried the release commit, only after `main.yml` has
   finished on it. The race tests of every `SAFETY` package run in the nightly FULL on the same
   `main`. Then the image is published (job `publish` calling `_image.yml` with `mode: release`, the only way to push a tag

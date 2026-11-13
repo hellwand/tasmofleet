@@ -32,6 +32,19 @@ jobs:
     with:
       scope: all
 
+  # Keeps the newest Go cache of each series on main (#692); the mutation shards save go-mutation when they end.
+  # Deletes only when the schedule started the run; a manual run, possibly from a branch, only previews.
+  cache-prune:
+    name: cache-prune
+    needs: mutation
+    if: ${{ always() }}
+    permissions:
+      contents: read
+      actions: write
+    uses: ./.github/workflows/cache-prune.yml
+    with:
+      dry-run: ${{ github.event_name != 'schedule' }}
+
   # One open issue "Weekly mutation run failed ..." (label ci) collects the failing weeks (_failure-issue.yml).
   weekly-failure-issue:
     name: weekly failure issue

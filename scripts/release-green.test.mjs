@@ -178,6 +178,22 @@ test("a failed job of main.yml is refused, but ghcr-cleanup may fail", () => {
   assert.equal(ok.status, 0, ok.stderr);
 });
 
+// The cache prune (#692) is housekeeping after the jobs that save the Go caches: a red one (a missing
+// permission, a listing that hit its limit) must be seen, but it must not hold back a release whose code is green.
+test("cache-prune may fail on main.yml, a failed check may not", () => {
+  const prune = { name: "cache-prune / prune go caches", conclusion: "failure" };
+  const ok = run({
+    jobs: { jobs: [{ name: "checks / lint", conclusion: "success" }, prune] },
+  });
+  assert.equal(ok.status, 0, ok.stderr);
+  const bad = run({
+    jobs: { jobs: [{ name: "checks / lint", conclusion: "failure" }, prune] },
+  });
+  assert.notEqual(bad.status, 0);
+  assert.match(bad.stderr, /checks \/ lint: failure/);
+  assert.doesNotMatch(bad.stderr, /cache-prune/);
+});
+
 // The Home Assistant app image is built apart from :edge and gates nothing (#522): a red one on main must not
 // refuse a release, while a red image build still does.
 test("ha-app may fail on main.yml, the image build may not", () => {

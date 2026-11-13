@@ -3,7 +3,7 @@
 # so the tag run does not check it again. Fails, with the reason, unless SHA has
 #   1. a successful check run "required" of pr.yml (the one status branch protection demands), and
 #   2. a successful main.yml run (push to main) whose jobs all succeeded; only ghcr-cleanup (registry
-#      housekeeping after the image) and ha-app (the Home Assistant app image, #522) may fail without holding a release.
+#      housekeeping after the image), cache-prune (the Go cache housekeeping, #692) and ha-app (the Home Assistant app image, #522) may fail without holding a release.
 # Main moves only by a fast-forward push of a PR head (docs/dev/pull-requests.md),
 # so the SHA of the tagged commit is the PR head and both are found under it.
 #
@@ -41,7 +41,7 @@ run=$(gh api --paginate "repos/$repo/actions/runs?head_sha=$sha&event=push&per_p
 id=$(jq -r .id <<<"$run")
 status=$(jq -r .status <<<"$run")
 [ "$status" = completed ] || fail "$sha: main.yml run $id is $status, not finished"
-jobs=$(gh api --paginate "repos/$repo/actions/runs/$id/jobs?per_page=100" --jq '.jobs[]' | jq -s '[.[] | select((.name | startswith("ghcr-cleanup") or startswith("ha-app")) | not)]')
+jobs=$(gh api --paginate "repos/$repo/actions/runs/$id/jobs?per_page=100" --jq '.jobs[]' | jq -s '[.[] | select((.name | startswith("ghcr-cleanup") or startswith("cache-prune") or startswith("ha-app")) | not)]')
 bad=$(jq -r '[.[] | select(.conclusion != "success" and .conclusion != "skipped") | "\(.name): \(.conclusion)"] | join(", ")' <<<"$jobs")
 [ -z "$bad" ] || fail "$sha: main.yml run $id has failed jobs: $bad"
 # A run that never started its jobs (a workflow file error ends it as startup_failure) has none that failed either.

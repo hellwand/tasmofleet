@@ -1,0 +1,79 @@
+# Prunes the Go caches of refs/heads/main (#692). .github/actions/go saves a new cache on every run on
+# main (the commit is part of the key), and a new Go version or go.sum hash starts a series the next run
+# cannot restore from. Nothing else removes the entries behind, and together they pass the 10 GB the
+# repository gets; GitHub's eviction then also takes caches that are still in use.
+# This keeps the newest entry of each series `go-<name>-<os>-` (the decision lives in
+# scripts/prune-go-caches.mjs: Go version and go.sum hash are not part of the series, the
+# two race shards are two series) and deletes the rest. Entries of other refs and caches that are not
+# Go caches (buildkit, CodeQL, npm, Tasmota sources) are left alone.
+#
+# It must run in a job of its own AFTER the jobs that save: actions/cache saves in the post step at
+# the end of its job, so a step inside the saving job would run before the new entry exists and the
+# superseded one would stay for another round. main.yml, nightly.yml and weekly.yml call it with
+# `needs` on the jobs that save; dispatch it by hand with dry-run to preview.
+name: cache-prune
+
+on:
+  workflow_call:
+    inputs:
+      dry-run:
+        description: "only log what would be deleted"
+        type: boolean
+        default: false
+  workflow_dispatch:
+    inputs:
+      dry-run:
+        description: "only log what would be deleted"
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+jobs:
+  prune:
+    name: prune go caches
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    # Three callers can overlap (a push, the nightly, the weekly run); the deletes are idempotent, but run one at a time.
+    concurrency:
+      group: cache-prune
+      cancel-in-progress: false
+    # A called workflow cannot hold more than its caller grants: the caller job names actions: write too.
+    permissions:
+      contents: read
+      actions: write
+    env:
+      DRY_RUN: ${{ inputs.dry-run }}
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      GH_REPO: ${{ github.repository }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: delete superseded Go caches
+        run: |
+          set -eu
+          # `--key` is a prefix match, which is what the listing wants. The limit is far above the
+          # 10 GB the repository gets (about 200 entries); a list that hits it is cut off and must not be pruned.
+          limit=1000
+          gh cache list --ref refs/heads/main --key go- --limit "$limit" --json id,key,ref,createdAt,sizeInBytes >caches.json
+          [ "$(jq length caches.json)" -lt "$limit" ] || { echo "::error::the cache listing hit its limit of $limit entries"; exit 1; }
+          node scripts/prune-go-caches.mjs <caches.json >delete.json
+          echo "go caches on main: $(jq length caches.json), superseded: $(jq length delete.json) ($(jq '[.[].sizeInBytes] | add // 0 | . / 1048576 | floor' delete.json) MiB)"
+          # Delete by id: the delete-by-key call matches the exact key and would need every sha.
+          jq -r '.[] | "\(.id)\t\(.sizeInBytes)\t\(.key)"' delete.json >delete.tsv
+          failed=0
+          # Read from a file, not a pipe: a pipe runs the loop in a subshell and $failed would stay 0.
+          while IFS="$(printf '\t')" read -r id size key; do
+            if [ "$DRY_RUN" = true ]; then
+              echo "would delete $key ($size bytes, id $id)"
+            elif gh cache delete "$id" >/dev/null; then
+              echo "deleted $key ($size bytes, id $id)"
+            else
+              echo "::warning::could not delete $key (id $id)"
+              failed=$((failed + 1))
+            fi
+          done <delete.tsv
+          # Missing actions: write would otherwise leave the job green and the caches in place.
+          [ "$failed" -eq 0 ] || { echo "::error::$failed caches could not be deleted"; exit 1; }
