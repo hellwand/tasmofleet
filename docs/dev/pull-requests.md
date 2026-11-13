@@ -33,6 +33,14 @@ job passes only when every job that had to run passed; a skip counts only when t
 not ask for that job; the link check, the migration guard and the release section guard must always succeed, and so must the image build check when the PR touches what the image reads (Dockerfile, module files, the HA app folder); the HA app image is built next to it (`_ha-app.yml`) and never gates the merge. No approvals are required (single maintainer). Release tags are still pushed
 directly, on a green commit of `main`.
 
+**Waiting for CI:** `tools/ci-wait.sh <pr> [max-minutes]` (#774). Never `gh pr checks --required --watch`: it ends at
+once, and reads like success, while the job `required` is not registered yet. The script first waits until checks are
+registered, then polls in slices of at most 9 minutes (default limit: 9, one slice, which fits one tool call (run it with the tool timeout at 10 minutes, or in the background); a longer
+limit belongs in a background run) and prints one line on stdout, `required=<success|failure|pending|none> sha=<head>`.
+Exit 0 means only: `required` of `pr.yml` is green on that head. Failure exits 1; `pending` or `none` at the limit exit 8:
+run it again. It re-reads the head of the PR around every reading, so a push during the wait is not mistaken for the
+result of the old head; compare `sha=` with the commit you meant to check.
+
 ## Branches and worktrees
 
 After a pull request is merged into `main`, its branch is deleted on origin and the

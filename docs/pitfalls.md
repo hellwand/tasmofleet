@@ -59,8 +59,8 @@ means nothing stops you: you have to know it. The full working rules are in
 - **Happened:** `gh pr checks <n> --required --watch` returns at once with "no
   required checks" while the `required` job is not registered yet, which reads like
   success.
-- **Rule:** use `timeout 2400 gh pr checks <n> --watch --interval 60`, then read the
-  `required` line.
+- **Rule:** use `tools/ci-wait.sh <n>` (see [pull-requests](dev/pull-requests.md)); it waits
+  until `required` is registered and prints `required=<result> sha=<head>`.
 - **Enforced:** not enforced, convention.
 
 ### A milestone cut as a strict chain (0.20.0)
