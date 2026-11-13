@@ -3883,7 +3883,7 @@ func importBodyPart(b importBody) templ.Component {
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 349, "\" hx-encoding=\"multipart/form-data\" hx-trigger=\"change\" hx-target=\"#import\" hx-swap=\"outerHTML\" data-dropzone><span class=\"add-drop-text\">")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 349, "\" hx-encoding=\"multipart/form-data\" hx-trigger=\"change\" data-busy-label=\"Import upload\" hx-target=\"#import\" hx-swap=\"outerHTML\" data-dropzone><span class=\"add-drop-text\">")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -3893,7 +3893,7 @@ func importBodyPart(b importBody) templ.Component {
 						var templ_7745c5c3_Var202 string
 						templ_7745c5c3_Var202, templ_7745c5c3_Err = templ.JoinStringErrs(listSep(i, len(b.Uploaded)))
 						if templ_7745c5c3_Err != nil {
-							return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/adddevices.templ`, Line: 757, Col: 37}
+							return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/adddevices.templ`, Line: 758, Col: 37}
 						}
 						_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var202))
 						if templ_7745c5c3_Err != nil {
@@ -3907,7 +3907,7 @@ func importBodyPart(b importBody) templ.Component {
 					var templ_7745c5c3_Var203 string
 					templ_7745c5c3_Var203, templ_7745c5c3_Err = templ.JoinStringErrs(n)
 					if templ_7745c5c3_Err != nil {
-						return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/adddevices.templ`, Line: 759, Col: 13}
+						return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/adddevices.templ`, Line: 760, Col: 13}
 					}
 					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var203))
 					if templ_7745c5c3_Err != nil {
@@ -3925,7 +3925,7 @@ func importBodyPart(b importBody) templ.Component {
 				var templ_7745c5c3_Var204 string
 				templ_7745c5c3_Var204, templ_7745c5c3_Err = templ.JoinStringErrs("uploaded from TasmoAdmin")
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/adddevices.templ`, Line: 761, Col: 34}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/adddevices.templ`, Line: 762, Col: 34}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var204))
 				if templ_7745c5c3_Err != nil {
@@ -3943,7 +3943,7 @@ func importBodyPart(b importBody) templ.Component {
 				var templ_7745c5c3_Var205 string
 				templ_7745c5c3_Var205, templ_7745c5c3_Err = templ.JoinStringErrs(" from TasmoAdmin, with ")
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/adddevices.templ`, Line: 764, Col: 51}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/adddevices.templ`, Line: 765, Col: 51}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var205))
 				if templ_7745c5c3_Err != nil {
@@ -3956,7 +3956,7 @@ func importBodyPart(b importBody) templ.Component {
 				var templ_7745c5c3_Var206 string
 				templ_7745c5c3_Var206, templ_7745c5c3_Err = templ.JoinStringErrs(" and ")
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/adddevices.templ`, Line: 764, Col: 82}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/adddevices.templ`, Line: 765, Col: 82}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var206))
 				if templ_7745c5c3_Err != nil {
@@ -3969,7 +3969,7 @@ func importBodyPart(b importBody) templ.Component {
 				var templ_7745c5c3_Var207 string
 				templ_7745c5c3_Var207, templ_7745c5c3_Err = templ.JoinStringErrs(" if you have them")
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/adddevices.templ`, Line: 764, Col: 132}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/adddevices.templ`, Line: 765, Col: 132}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var207))
 				if templ_7745c5c3_Err != nil {
@@ -4042,7 +4042,7 @@ func importBodyPart(b importBody) templ.Component {
 				var templ_7745c5c3_Var208 string
 				templ_7745c5c3_Var208, templ_7745c5c3_Err = templ.ResolveAttributeValue(b.Base + "/import/tasmoadmin/apply")
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/adddevices.templ`, Line: 797, Col: 78}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/adddevices.templ`, Line: 798, Col: 78}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var208)
 				if templ_7745c5c3_Err != nil {
@@ -4055,7 +4055,7 @@ func importBodyPart(b importBody) templ.Component {
 				var templ_7745c5c3_Var209 string
 				templ_7745c5c3_Var209, templ_7745c5c3_Err = templ.ResolveAttributeValue(b.CSRF)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/adddevices.templ`, Line: 798, Col: 53}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/adddevices.templ`, Line: 799, Col: 53}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var209)
 				if templ_7745c5c3_Err != nil {
@@ -4068,7 +4068,7 @@ func importBodyPart(b importBody) templ.Component {
 				var templ_7745c5c3_Var210 string
 				templ_7745c5c3_Var210, templ_7745c5c3_Err = templ.ResolveAttributeValue(b.Plan.Token)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/adddevices.templ`, Line: 799, Col: 59}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/adddevices.templ`, Line: 800, Col: 59}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var210)
 				if templ_7745c5c3_Err != nil {
@@ -4091,7 +4091,7 @@ func importBodyPart(b importBody) templ.Component {
 				var templ_7745c5c3_Var211 string
 				templ_7745c5c3_Var211, templ_7745c5c3_Err = templ.JoinStringErrs(plural(b.Plan.Create+b.Plan.Merge, "device"))
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/adddevices.templ`, Line: 806, Col: 112}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/adddevices.templ`, Line: 807, Col: 112}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var211))
 				if templ_7745c5c3_Err != nil {
@@ -4120,7 +4120,7 @@ func importBodyPart(b importBody) templ.Component {
 			var templ_7745c5c3_Var212 string
 			templ_7745c5c3_Var212, templ_7745c5c3_Err = templ.JoinStringErrs(b.Report.Summary)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/adddevices.templ`, Line: 818, Col: 74}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/adddevices.templ`, Line: 819, Col: 74}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var212))
 			if templ_7745c5c3_Err != nil {
@@ -4153,7 +4153,7 @@ func importBodyPart(b importBody) templ.Component {
 			var templ_7745c5c3_Var213 templ.SafeURL
 			templ_7745c5c3_Var213, templ_7745c5c3_Err = templ.JoinURLErrs(templ.SafeURL(b.Base + "/import/tasmoadmin/report.csv"))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/adddevices.templ`, Line: 829, Col: 81}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/adddevices.templ`, Line: 830, Col: 81}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var213))
 			if templ_7745c5c3_Err != nil {
@@ -4166,7 +4166,7 @@ func importBodyPart(b importBody) templ.Component {
 			var templ_7745c5c3_Var214 templ.SafeURL
 			templ_7745c5c3_Var214, templ_7745c5c3_Err = templ.JoinURLErrs(templ.SafeURL(b.Base + "/devices/new#card-import"))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/adddevices.templ`, Line: 830, Col: 76}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/adddevices.templ`, Line: 831, Col: 76}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var214))
 			if templ_7745c5c3_Err != nil {
@@ -4179,7 +4179,7 @@ func importBodyPart(b importBody) templ.Component {
 			var templ_7745c5c3_Var215 templ.SafeURL
 			templ_7745c5c3_Var215, templ_7745c5c3_Err = templ.JoinURLErrs(templ.SafeURL(b.Base + "/devices"))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/adddevices.templ`, Line: 831, Col: 72}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/adddevices.templ`, Line: 832, Col: 72}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var215))
 			if templ_7745c5c3_Err != nil {
@@ -4256,7 +4256,7 @@ func importRowView(r importRow, badgeClass string) templ.Component {
 		var templ_7745c5c3_Var219 string
 		templ_7745c5c3_Var219, templ_7745c5c3_Err = templ.JoinStringErrs(r.Name)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/adddevices.templ`, Line: 843, Col: 41}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/adddevices.templ`, Line: 844, Col: 41}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var219))
 		if templ_7745c5c3_Err != nil {
@@ -4274,7 +4274,7 @@ func importRowView(r importRow, badgeClass string) templ.Component {
 			var templ_7745c5c3_Var220 string
 			templ_7745c5c3_Var220, templ_7745c5c3_Err = templ.JoinStringErrs(r.Address)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/adddevices.templ`, Line: 845, Col: 65}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/adddevices.templ`, Line: 846, Col: 65}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var220))
 			if templ_7745c5c3_Err != nil {
@@ -4292,7 +4292,7 @@ func importRowView(r importRow, badgeClass string) templ.Component {
 		var templ_7745c5c3_Var221 string
 		templ_7745c5c3_Var221, templ_7745c5c3_Err = templ.JoinStringErrs(r.Why)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/adddevices.templ`, Line: 848, Col: 38}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/adddevices.templ`, Line: 849, Col: 38}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var221))
 		if templ_7745c5c3_Err != nil {

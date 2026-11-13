@@ -11,10 +11,12 @@
     return document.getElementById("toasts");
   }
 
+  // show returns a function that closes the toast again (a no-op when nothing was shown), so a caller
+  // that announced something for a while can take it back when that is over (#634).
   function show(text, tone) {
     var r = region();
     if (!r || !text) {
-      return;
+      return function () {};
     }
     tone = tone || "ok";
     var t = document.createElement("div");
@@ -26,6 +28,11 @@
     txt.textContent = text;
     t.appendChild(dot);
     t.appendChild(txt);
+    var timer = 0;
+    function close() {
+      window.clearTimeout(timer);
+      t.remove();
+    }
     if (tone === "warn" || tone === "danger") {
       t.classList.add("has-x");
       var x = document.createElement("button");
@@ -33,16 +40,13 @@
       x.className = "toast-x";
       x.setAttribute("aria-label", "Dismiss");
       x.textContent = "×";
-      x.addEventListener("click", function () {
-        t.remove();
-      });
+      x.addEventListener("click", close);
       t.appendChild(x);
     } else {
-      window.setTimeout(function () {
-        t.remove();
-      }, FADE_MS);
+      timer = window.setTimeout(close, FADE_MS);
     }
     r.appendChild(t);
+    return close;
   }
   window.tfToast = show;
 

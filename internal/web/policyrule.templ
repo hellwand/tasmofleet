@@ -252,6 +252,7 @@ templ ruleEditCard(p rulePageView, e *ruleEditor) {
 			action={ templ.SafeURL(p.Base + rulesPath + "/save") }
 			hx-post={ p.Base + rulesPath + "/preview" }
 			hx-trigger="change, input changed delay:400ms, htmx:afterSwap from:#want-control delay:50ms"
+			data-busy-label="Rule preview"
 			hx-target="#rule-devices"
 			hx-swap="outerHTML"
 			novalidate

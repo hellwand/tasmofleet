@@ -376,31 +376,42 @@
 // second click does nothing; after about 10 s a toast says it is still working. Two sources:
 // the submitter of a plain POST form (busy until the next page arrives, a form[data-no-busy] such
 // as a file download opts out) and the htmx controls (busy until the request ends). A section that
-// loads by itself (aria-busy="true" with hx-trigger="load") gets the same note. Without this file
-// everything works the same, minus the busy look.
+// loads by itself (aria-busy="true" with hx-trigger="load") gets the same note, and the note goes
+// away when its request ends. A control a person changes (a file, a field, a form with a live
+// preview: htmx events change and input) says aria-busy and draws a ring (app.css), nothing more:
+// it is never disabled and a newer request is never dropped, so the newest value is always sent.
+// A request that never got an answer (htmx:sendError, htmx:timeout) says so in a toast naming the
+// control (#634). A link to a page whose handler reads a device before it answers says aria-busy
+// until the page replaces this one. Without this file everything works the same, minus the busy look.
 (function () {
   "use strict";
   var NOTE_MS = 10000;
   var NOTE = "Still working. A slow device can take up to a minute.";
-  var notes = new WeakMap(); // element -> the timer of its pending note
+  var notes = new WeakMap(); // element -> its pending note: {timer, close} (close once it is shown)
+  var failures = new WeakMap(); // element -> the function that closes its error toast
 
   // One timer per element, cancelled when its work ends (quiet): the timer of an earlier, finished
   // request on the same control must not speak for a later one that has only just started.
   function note(el, still) {
     quiet(el);
-    notes.set(
-      el,
-      window.setTimeout(function () {
-        notes.delete(el);
-        if (still() && typeof window.tfToast === "function") {
-          window.tfToast(NOTE, "info");
-        }
-      }, NOTE_MS),
-    );
+    var n = { timer: 0, close: null };
+    n.timer = window.setTimeout(function () {
+      if (still() && typeof window.tfToast === "function") {
+        n.close = window.tfToast(NOTE, "info");
+      }
+    }, NOTE_MS);
+    notes.set(el, n);
   }
+  // the work ended: no note is due any more, and one that is showing goes away with it
   function quiet(el) {
-    window.clearTimeout(notes.get(el));
-    notes.delete(el);
+    var n = notes.get(el);
+    if (n) {
+      window.clearTimeout(n.timer);
+      if (n.close) {
+        n.close();
+      }
+      notes.delete(el);
+    }
   }
   function submitButtons(form) {
     var sel = "button[type=submit], button:not([type])";
@@ -471,26 +482,53 @@
       quiet(f);
     });
     document.querySelectorAll("button[aria-busy=true]").forEach(off);
+    document.querySelectorAll("a[aria-busy=true]").forEach(function (a) {
+      a.removeAttribute("aria-busy");
+    });
   });
 
-  function byClick(e) {
+  // What a person did to start an htmx request: "act" (a click or a submit: the control is disabled
+  // and ignores a second click), "edit" (a change or input: aria-busy only), "" for everything else
+  // (a live swap announced by the server, polling, a load placeholder, htmx.ajax). The same answer
+  // is used when the request starts and when it ends, so a control is never left busy.
+  function trigger(e) {
     var t =
       e.detail &&
       e.detail.requestConfig &&
       e.detail.requestConfig.triggeringEvent;
-    return !!t && (t.type === "click" || t.type === "submit");
+    if (!t) {
+      return "";
+    }
+    if (t.type === "click" || t.type === "submit") {
+      return "act";
+    }
+    return t.type === "change" || t.type === "input" ? "edit" : "";
+  }
+  // an edited control sends its request to a target (the part of the page that changes); the target
+  // is marked too, so the part that is being replaced can show it (the live rule preview)
+  function edited(e, el) {
+    var tg = e.detail.requestConfig.target;
+    return tg instanceof Element && tg !== el ? [el, tg] : [el];
   }
   document.addEventListener("htmx:beforeRequest", function (e) {
     var el = e.detail && e.detail.elt;
-    if (!el || !byClick(e)) {
+    var k = el ? trigger(e) : "";
+    if (!k) {
       return;
     }
-    if (el.getAttribute("aria-busy") === "true") {
-      e.preventDefault();
-      return;
+    if (k === "edit") {
+      // never preventDefault here: the newer value is the one that has to be sent
+      edited(e, el).forEach(function (x) {
+        x.setAttribute("aria-busy", "true");
+      });
+    } else {
+      if (el.getAttribute("aria-busy") === "true") {
+        e.preventDefault();
+        return;
+      }
+      el.setAttribute("aria-busy", "true");
+      targets(el).forEach(on);
     }
-    el.setAttribute("aria-busy", "true");
-    targets(el).forEach(on);
     note(el, function () {
       return el.isConnected && el.getAttribute("aria-busy") === "true";
     });
@@ -500,12 +538,117 @@
     // the closest ancestor still in the page (detail.elt), which was never busy and stays untouched
     var cfg = e.detail && e.detail.requestConfig;
     var el = cfg && cfg.elt;
-    if (!el || !byClick(e)) {
+    if (!el) {
       return;
     }
-    quiet(el);
-    el.removeAttribute("aria-busy");
-    targets(el).forEach(off);
+    // the note belongs to the request that ended, whatever started it (a placeholder that loads by
+    // itself has one too); the note of a plain form that is still being sent is not ours to close
+    if (!el.hasAttribute("data-busy")) {
+      quiet(el);
+    }
+    var k = trigger(e);
+    if (!k) {
+      return;
+    }
+    (k === "edit" ? edited(e, el) : [el]).forEach(function (x) {
+      x.removeAttribute("aria-busy");
+    });
+    if (k === "act") {
+      targets(el).forEach(off);
+    }
+  });
+
+  // The name of a control for a message: what it says, else what it is labelled. "Toggle relay 1,
+  // currently ON" is cut at the comma.
+  function nameOf(el) {
+    var src = el instanceof HTMLFormElement ? submitButtons(el)[0] : null;
+    var s =
+      el.getAttribute("data-busy-label") ||
+      (src && src.textContent) ||
+      el.getAttribute("aria-label") ||
+      (el.labels && el.labels[0] && el.labels[0].textContent) ||
+      (el instanceof HTMLButtonElement || el instanceof HTMLAnchorElement
+        ? el.textContent
+        : "") ||
+      el.getAttribute("title") ||
+      "";
+    s = s.split(",")[0].replace(/\s+/g, " ").trim();
+    return s && s.length <= 40 ? s : "The request";
+  }
+  // A person-started request that got no answer. One toast per control: a preview that fails on
+  // every keystroke must not pile them up. A server error (4xx, 5xx) is an answer and is swapped in.
+  function failed(e, what) {
+    var cfg = e.detail && e.detail.requestConfig;
+    var el = cfg && cfg.elt;
+    if (!el || !trigger(e) || typeof window.tfToast !== "function") {
+      return;
+    }
+    var prev = failures.get(el);
+    if (prev) {
+      prev();
+    }
+    failures.set(el, window.tfToast(nameOf(el) + " " + what, "danger"));
+  }
+  document.addEventListener("htmx:sendError", function (e) {
+    failed(e, "was not sent: no connection.");
+  });
+  // htmx has no timeout of its own (shell.templ htmxConfig); this is for one that is set
+  document.addEventListener("htmx:timeout", function (e) {
+    failed(e, "timed out.");
+  });
+
+  // Pages whose handler reads a device before it answers (#634): the restore confirmation, the
+  // drift comparison (a live read when the cached one is stale), the replace page (it asks every
+  // discovered device) and its preview. Every other GET reads the
+  // database or the cache. Until the page arrives, the link or the form button that was used says so.
+  var DEVICE_PAGES = /\/(?:backups\/\d+\/restore|devices\/\d+\/(?:drift|replace(?:\/preview)?))$/;
+  function devicePage(url) {
+    try {
+      var u = new URL(url);
+      return u.origin === window.location.origin && DEVICE_PAGES.test(u.pathname);
+    } catch (err) {
+      return false; // not a URL: not ours
+    }
+  }
+  document.addEventListener("click", function (e) {
+    var a = e.target instanceof Element ? e.target.closest("a[href]") : null;
+    if (
+      !a ||
+      e.button !== 0 ||
+      e.ctrlKey ||
+      e.metaKey ||
+      e.shiftKey ||
+      e.altKey ||
+      (a.target && a.target !== "_self") ||
+      a.hasAttribute("download") ||
+      !devicePage(a.href)
+    ) {
+      return;
+    }
+    // after the other handlers had their say (a tab or a menu may take the click over)
+    window.setTimeout(function () {
+      if (!e.defaultPrevented) {
+        a.setAttribute("aria-busy", "true");
+      }
+    }, 0);
+  });
+  document.addEventListener("submit", function (e) {
+    var form = e.target;
+    if (
+      !(form instanceof HTMLFormElement) ||
+      form.method !== "get" ||
+      form.target ||
+      !e.submitter ||
+      !devicePage(form.action)
+    ) {
+      return;
+    }
+    var btn = e.submitter;
+    window.setTimeout(function () {
+      if (!e.defaultPrevented) {
+        on(btn);
+      }
+    }, 0);
   });
 
   // a section that loads by itself says it is still working too

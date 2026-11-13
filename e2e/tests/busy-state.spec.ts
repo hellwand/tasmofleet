@@ -301,3 +301,205 @@ test("a busy list power toggle has no ring and keeps its knob", async ({
   expect(busy.w).toBeCloseTo(idle.w, 0);
   expect(busy.h).toBeCloseTo(idle.h, 0);
 });
+
+// ---- #634: every htmx control shows that it runs, and a network error says what failed ----
+
+const importCsv = { name: "devices.csv", mimeType: "text/csv", buffer: Buffer.from('1,"x",127.0.0.1,,,bulb_1,1,1,0,0,1,80,"x",0,x,0\n') };
+
+// Why: the import upload is sent on the file's change event, not on a click. A person who drops a
+// file must see that it is being read; before #634 only click and submit controls were marked.
+test("a control sent on change is busy while its request runs", async ({ page }) => {
+  await page.setExtraHTTPHeaders(admin);
+  let release!: () => void;
+  const gate = new Promise<void>((r) => (release = r));
+  await page.route("**/import/tasmoadmin", async (route) => {
+    await gate;
+    await route.continue();
+  });
+  await page.goto(app.url + "/devices/new");
+  const zone = page.locator("form.add-drop");
+  await page.setInputFiles('input[name="files"]', importCsv);
+  await expect(zone).toHaveAttribute("aria-busy", "true");
+  // the ring is drawn by a background, not a new box, so the layout stays put
+  expect(await zone.evaluate((z) => getComputedStyle(z).backgroundImage)).toContain("url(");
+  release();
+  await expect(page.getByRole("heading", { name: "Import plan" })).toBeVisible();
+});
+
+// Why: the rule form sends a live preview on every change and, 400 ms after the last keystroke, on
+// input. A busy state that disabled the form or dropped the newer request would make the preview
+// show a value the person has already changed. The newest value must always be sent.
+test("typing in the rule form during a slow preview still sends the last value", async ({ page }) => {
+  await page.setExtraHTTPHeaders(admin);
+  await page.goto(app.url + "/policy/rules/new?template=timezone");
+  let release!: () => void;
+  const gate = new Promise<void>((r) => (release = r));
+  const names: string[] = [];
+  await page.route("**/policy/rules/preview", async (route) => {
+    names.push(new URLSearchParams(route.request().postData() ?? "").get("name") ?? "");
+    if (names.length === 1) await gate;
+    await route.continue();
+  });
+  const name = page.locator('#rule-form input[name="name"]');
+  const form = page.locator("#rule-form");
+  const note = page.locator("#rule-devices .devcard-note");
+  const noteX = (await note.boundingBox())!.x;
+  await name.fill("first");
+  await expect.poll(() => names.length).toBe(1);
+  await expect(form).toHaveAttribute("aria-busy", "true");
+  // the ring has its room all the time: the note does not jump left when a preview starts
+  await expect(page.locator("#rule-devices")).toHaveAttribute("aria-busy", "true");
+  expect((await note.boundingBox())!.x).toBe(noteX);
+  // nothing in the form is taken away while the preview runs
+  await expect(name).toBeEnabled();
+  await expect(page.getByRole("button", { name: "Save rule" })).toBeEnabled();
+  await name.fill("second");
+  await page.waitForTimeout(700); // past the 400 ms input delay: the newer request is queued behind the slow one
+  release();
+  await expect.poll(() => names.at(-1)).toBe("second");
+  await expect(form).not.toHaveAttribute("aria-busy", "true");
+});
+
+// Why: a request that never reached the server cleared the busy state without a word, so the person
+// did not know the click had done nothing. The toast names the control and what failed.
+test("a request that cannot be sent says which control failed", async ({ page }) => {
+  await page.setExtraHTTPHeaders(admin);
+  const href = await devicePath(page);
+  await page.route("**/probe", (route) => route.abort("failed"));
+  await page.goto(app.url + href);
+  const btn = page.getByRole("button", { name: "Refresh identity" });
+  await btn.click();
+  const toast = page.locator("#toasts .toast.tone-danger");
+  await expect(toast).toContainText("Refresh identity was not sent: no connection");
+  await expect(btn).toBeEnabled();
+  await expect(btn).not.toHaveAttribute("aria-busy", "true");
+  // a failed upload is named too, although its form has no label of its own
+  await page.route("**/import/tasmoadmin", (route) => route.abort("failed"));
+  await page.goto(app.url + "/devices/new");
+  await page.setInputFiles('input[name="files"]', importCsv);
+  await expect(page.locator("#toasts .toast.tone-danger")).toContainText("Import upload was not sent: no connection");
+  await expect(page.locator("form.add-drop")).not.toHaveAttribute("aria-busy", "true");
+});
+
+// Why: a toast per failed preview would pile up while the server is away; one per control is enough.
+test("a failing preview shows one error toast, not one per keystroke", async ({ page }) => {
+  await page.setExtraHTTPHeaders(admin);
+  await page.goto(app.url + "/policy/rules/new?template=timezone");
+  let sent = 0;
+  await page.route("**/policy/rules/preview", (route) => {
+    sent++;
+    return route.abort("failed");
+  });
+  const name = page.locator('#rule-form input[name="name"]');
+  await name.fill("a");
+  await expect.poll(() => sent).toBeGreaterThanOrEqual(1);
+  await name.fill("ab");
+  await expect.poll(() => sent).toBeGreaterThanOrEqual(2);
+  await expect(page.locator("#toasts .toast.tone-danger")).toHaveCount(1);
+});
+
+// Why: htmx has no timeout configured, so this only shows when someone (or a later setting) sets
+// one; the toast then says "timed out" rather than leaving the control quiet.
+test("a request that times out says so", async ({ page }) => {
+  await page.setExtraHTTPHeaders(admin);
+  const href = await devicePath(page);
+  let release!: () => void;
+  const gate = new Promise<void>((r) => (release = r));
+  await page.route("**/probe", async (route) => {
+    await gate;
+    await route.continue().catch(() => {}); // the request is gone by then
+  });
+  await page.goto(app.url + href);
+  await page.evaluate(() => {
+    (window as unknown as { htmx: { config: { timeout: number } } }).htmx.config.timeout = 300;
+  });
+  const btn = page.getByRole("button", { name: "Refresh identity" });
+  await btn.click();
+  await expect(page.locator("#toasts .toast.tone-danger")).toContainText("Refresh identity timed out");
+  await expect(btn).toBeEnabled();
+  await expect(btn).not.toHaveAttribute("aria-busy", "true");
+  release();
+});
+
+// Why: the "Still working" note is about a request that is running. It stayed for the 4.5 s fade
+// after the answer had arrived, which told the person the page was still waiting.
+test("the still-working note goes away when its request ends", async ({ page }) => {
+  test.setTimeout(60_000);
+  await page.setExtraHTTPHeaders(admin);
+  const href = await devicePath(page);
+  let release!: () => void;
+  const gate = new Promise<void>((r) => (release = r));
+  await page.route("**/probe", async (route) => {
+    await gate;
+    await route.continue();
+  });
+  await page.goto(app.url + href);
+  await page.getByRole("button", { name: "Refresh identity" }).click();
+  await expect(page.locator("#toasts")).toContainText("Still working", { timeout: 15_000 });
+  release();
+  await expect(page.getByText("Identity refreshed.")).toBeVisible();
+  // well inside the 4.5 s fade
+  await expect(page.locator("#toasts")).not.toContainText("Still working", { timeout: 1_500 });
+});
+
+// Why: the replace page reads the new device while the page loads; the link that was clicked is the
+// only thing the person sees meanwhile. It says aria-busy until the next page replaces this one. The
+// page cannot be inspected while its navigation is held, so a probe in the page writes what it saw
+// at the moment it was left to sessionStorage.
+test("a link to a page that reads a device is busy until the page arrives", async ({ page }) => {
+  await page.setExtraHTTPHeaders(admin);
+  const href = await devicePath(page);
+  await page.route("**" + href + "/replace", async (route) => {
+    await new Promise((r) => setTimeout(r, 2000));
+    await route.continue();
+  });
+  await page.goto(app.url + href);
+  const link = page.getByRole("link", { name: "Replace device" });
+  await page.evaluate(() => {
+    window.addEventListener("pagehide", () => sessionStorage.setItem("probe", document.querySelector('a[href$="/replace"]')?.getAttribute("aria-busy") ?? "none"));
+  });
+  await link.click({ noWaitAfter: true });
+  await expect(page.getByRole("heading", { name: "Move this configuration onto a new device" })).toBeVisible();
+  expect(await page.evaluate(() => sessionStorage.getItem("probe"))).toBe("true");
+});
+
+// Why: the drift comparison takes a live snapshot when the cached read is stale, so it blocks on the
+// device like the replace page; a tab that stays unmarked leaves the person clicking again.
+test("the Drift tab link is busy until the page arrives", async ({ page }) => {
+  await page.setExtraHTTPHeaders(admin);
+  const href = await devicePath(page);
+  await page.route("**" + href + "/drift", async (route) => {
+    await new Promise((r) => setTimeout(r, 2000));
+    await route.continue();
+  });
+  await page.goto(app.url + href);
+  const link = page.getByRole("link", { name: "Drift" });
+  await page.evaluate(() => {
+    window.addEventListener("pagehide", () => sessionStorage.setItem("probe", document.querySelector('a[href$="/drift"]')?.getAttribute("aria-busy") ?? "none"));
+  });
+  await link.click({ noWaitAfter: true });
+  await expect(page).toHaveURL(/\/drift$/);
+  expect(await page.evaluate(() => sessionStorage.getItem("probe"))).toBe("true");
+});
+
+// Why: the replace preview is a GET form, not a link, and reads the new device before it answers;
+// its button says so the same way, and is not locked for good if the person comes back.
+test("the button of a form that reads a device is busy until the page arrives", async ({ page }) => {
+  await page.setExtraHTTPHeaders(admin);
+  const href = await devicePath(page);
+  await page.route("**" + href + "/replace/preview*", async (route) => {
+    await new Promise((r) => setTimeout(r, 1500));
+    await route.continue();
+  });
+  await page.goto(app.url + href + "/replace");
+  const addr = page.locator('#rp-pick input[name="address"]');
+  if (!(await addr.isVisible())) await page.locator("#rp-pick summary").click();
+  await addr.fill("127.0.0.1");
+  const btn = page.locator("#rp-pick").getByRole("button", { name: /Preview/ });
+  await btn.evaluate((b: HTMLButtonElement) => {
+    b.form!.addEventListener("submit", () => setTimeout(() => sessionStorage.setItem("probe", JSON.stringify({ busy: b.getAttribute("aria-busy"), disabled: b.disabled })), 300), { once: true });
+  });
+  await btn.click();
+  await expect(page).toHaveURL(/\/replace\/preview/);
+  expect(JSON.parse((await page.evaluate(() => sessionStorage.getItem("probe"))) ?? "null")).toEqual({ busy: "true", disabled: true });
+});

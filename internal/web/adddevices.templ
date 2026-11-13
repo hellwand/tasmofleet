@@ -746,6 +746,7 @@ templ importBodyPart(b importBody) {
 				hx-post={ b.Base + "/import/tasmoadmin" }
 				hx-encoding="multipart/form-data"
 				hx-trigger="change"
+				data-busy-label="Import upload"
 				hx-target="#import"
 				hx-swap="outerHTML"
 				data-dropzone
