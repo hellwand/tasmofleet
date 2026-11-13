@@ -323,6 +323,24 @@ func (h *handler) commandSuggest(w http.ResponseWriter, r *http.Request) {
 
 // ---- value kinds from the catalogue ----
 
+// coordinateHint is the value hint of Latitude and Longitude. The rule and the device's reply are
+// both compared at four decimals (settings.CanonicalWant), so the hint states that, the range, and
+// that a whole number is not a prefix (48 means 48.0000 and deviates for a device at 48.2082). The
+// limits repeat the ones CanonicalWant enforces; a test pins the wording, not the engine.
+func coordinateHint(command string) string {
+	var limit string
+	switch {
+	case strings.EqualFold(command, "Latitude"):
+		limit = "-90 to 90"
+	case strings.EqualFold(command, "Longitude"):
+		limit = "-180 to 180"
+	default:
+		return ""
+	}
+	return "Decimal number, " + limit + ", compared to 4 decimals: 48.2082 and 48.208200 are the same. " +
+		"A whole number such as 48 means 48.0000, not a prefix."
+}
+
 // catalogueValue fills vc from the catalogue for a command no curated setting covers. It reports
 // whether the catalogue knew the command with a usable kind.
 func catalogueValue(vc *valueControl, command string, keepInvalid bool) bool {
@@ -347,6 +365,9 @@ func catalogueValue(vc *valueControl, command string, keepInvalid bool) bool {
 			what += fmt.Sprintf(", %d to %d", *spec.Min, *spec.Max)
 		}
 		vc.Hint = what + "."
+		if h := coordinateHint(command); h != "" {
+			vc.Hint = h
+		}
 		if !keepInvalid && vc.Want != "" && catalogueWantProblem(command, vc.Want) != "" {
 			vc.Want = ""
 		}
