@@ -45,6 +45,12 @@ func splitCmd(cmd string) (name, base string, idx int, hasIdx bool, data string)
 }
 
 func unknownReply(base string, idx int, hasIdx bool, data string) []byte {
+	return []byte(`{"Command":"Unknown","Input":` + jsonString(cmdInput(base, idx, hasIdx, data)) + `}`)
+}
+
+// cmdInput is the "Input" of a Command Unknown/Error reply: the name in upper case, the index unless it
+// is 1, the data (support_command.ino, command_line in ExecuteCommand).
+func cmdInput(base string, idx int, hasIdx bool, data string) string {
 	in := strings.ToUpper(base)
 	if hasIdx && idx != 1 {
 		in += strconv.Itoa(idx)
@@ -52,7 +58,7 @@ func unknownReply(base string, idx int, hasIdx bool, data string) []byte {
 	if data != "" {
 		in += " " + data
 	}
-	return []byte(`{"Command":"Unknown","Input":` + jsonString(in) + `}`)
+	return in
 }
 
 func errorReply(in string) []byte {
@@ -264,7 +270,11 @@ func (d *simDevice) powerLocked(idx int, hasIdx bool, data string, v view) ([]by
 		n = idx
 	}
 	if n < 0 || n > len(d.relays) {
-		return unknownReply("power", idx, hasIdx, data), nil
+		// CmndPower writes no response for a relay the device does not have, so ExecuteCommand answers
+		// Command Error (the command exists), published like any reply: on RESULT, or on POWER with
+		// SetOption4 1 (#648).
+		body := errorReply(cmdInput("power", idx, hasIdx, data))
+		return body, []outMsg{{topic: "stat/" + d.topic + "/RESULT", payload: string(body)}}
 	}
 	targets := []int{n - 1}
 	if n == 0 {

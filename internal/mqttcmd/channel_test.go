@@ -837,6 +837,145 @@ func TestSetOption4BacklogCollectsOneReplyPerQueuedCommand(t *testing.T) {
 	}
 }
 
+// Why (#648): a device with SetOption4 1 answers Upgrade on stat/<t>/UPGRADE (CmndUpgrade, v15.6.0
+// support_command.ino:1338 and :517), the topic of its own later download report. Before the fix the
+// channel did not listen there, so "Upgrade 1" over MQTT waited out the reply timeout and the OTA
+// engine lost the "Version X from <url>" echo it checks the URL with (#504); a bare Upgrade (a read
+// since #605 goes over MQTT first) timed out the same way.
+func TestSetOption4UpgradeRepliesAreAnswers(t *testing.T) {
+	for _, tc := range []struct{ cmd, payload string }{
+		{"Upgrade 1", `{"Upgrade":"Version 15.6.0 from http://192.0.2.1/tasmota.bin.gz"}`},
+		{"Upgrade", `{"Upgrade":"1 or >15.6.0 to upgrade"}`},
+		{"Upgrade 2", `{"Upgrade":"Safeboot"}`}, // ESP32 with a safeboot partition
+	} {
+		t.Run(tc.cmd, func(t *testing.T) {
+			b := &fakeBus{}
+			b.onPub = func(b *fakeBus, p pub) { b.emit(mqttbus.KindUpgrade, p.topic, "UPGRADE", tc.payload, false) }
+			got, err := newChan(b).Do(t.Context(), plug(), tc.cmd)
+			if err != nil || string(got) != tc.payload {
+				t.Fatalf("%s, %v", got, err)
+			}
+		})
+	}
+}
+
+// Why (#648, safety rule 3): stat/<t>/UPGRADE also carries the download's own report, "Failed ..." or
+// "Successful. Restarting", published by the device long after the command (support_tasmota.ino:1530).
+// Taken as the answer to an Upgrade 1 it would hand the engine a reply without the URL echo for a
+// download that may be running, and taken as the answer to any other command it would confirm a
+// command the device never answered. Only the immediate reply answers, and only an Upgrade.
+func TestUpgradeReportsNeverAnswerACommand(t *testing.T) {
+	reports := []string{`{"Upgrade":"Failed HTTP error: connection failed"}`, `{"Upgrade":"Successful. Restarting"}`}
+	for _, cmd := range []string{"Upgrade 1", "Upgrade", "TelePeriod"} {
+		t.Run(cmd, func(t *testing.T) {
+			b := &fakeBus{}
+			b.onPub = func(b *fakeBus, p pub) {
+				for _, r := range reports {
+					b.emit(mqttbus.KindUpgrade, p.topic, "UPGRADE", r, false)
+				}
+			}
+			if got, err := newChan(b).Do(t.Context(), plug(), cmd); !errors.Is(err, tasmota.ErrTimeout) {
+				t.Fatalf("%s, %v: a download report answered %s", got, err, cmd)
+			}
+		})
+	}
+	// The report of an earlier download arrives first; the command's own reply after it is the answer.
+	b := &fakeBus{}
+	want := `{"Upgrade":"Version 15.6.0 from http://192.0.2.1/tasmota.bin.gz"}`
+	b.onPub = func(b *fakeBus, p pub) {
+		b.emit(mqttbus.KindUpgrade, p.topic, "UPGRADE", reports[0], false)
+		b.emit(mqttbus.KindUpgrade, p.topic, "UPGRADE", want, false)
+	}
+	if got, err := newChan(b).Do(t.Context(), plug(), "Upgrade 1"); err != nil || string(got) != want {
+		t.Fatalf("%s, %v", got, err)
+	}
+	// Another device's reply, a retained one and another command's key on the UPGRADE topic do not answer either.
+	for name, emit := range map[string]func(b *fakeBus, p pub){
+		"another device": func(b *fakeBus, _ pub) { b.emit(mqttbus.KindUpgrade, "other", "UPGRADE", want, false) },
+		"retained":       func(b *fakeBus, p pub) { b.emit(mqttbus.KindUpgrade, p.topic, "UPGRADE", want, true) },
+		"another key": func(b *fakeBus, p pub) {
+			b.emit(mqttbus.KindUpgrade, p.topic, "UPGRADE", `{"Upload":"Version 15.6.0 from x"}`, false)
+		},
+		"not JSON": func(b *fakeBus, p pub) {
+			b.emit(mqttbus.KindUpgrade, p.topic, "UPGRADE", "Version 15.6.0 from x", false)
+		},
+		"more than the reply": func(b *fakeBus, p pub) {
+			b.emit(mqttbus.KindUpgrade, p.topic, "UPGRADE", `{"Upgrade":"Version 15.6.0 from x","Rule":1}`, false)
+		},
+	} {
+		b := &fakeBus{onPub: emit}
+		if _, err := newChan(b).Do(t.Context(), plug(), "Upgrade 1"); !errors.Is(err, tasmota.ErrTimeout) {
+			t.Errorf("%s: %v", name, err)
+		}
+	}
+}
+
+// Why (#648): with SetOption4 1 a Power command for a relay the device does not have (Power3 on a
+// two-relay device) fails with {"Command":"Error"} on stat/<t>/POWER, the command's name without its
+// index (support_command.ino:498-517). Before the fix that topic was read only as relay POWER1, so the
+// failure ran into the reply timeout: an unknown outcome for a command the device refused at once.
+func TestSetOption4PowerErrorOnTheUnindexedTopicFailsTheCommand(t *testing.T) {
+	b := &fakeBus{}
+	b.onPub = func(b *fakeBus, p pub) {
+		b.emit(mqttbus.KindPower, p.topic, "POWER", `{"Command":"Error","Input":"POWER3 ON"}`, false)
+	}
+	if got, err := newChan(b).Do(t.Context(), plug(), "Power3 ON"); !errors.Is(err, tasmota.ErrCommandError) {
+		t.Fatalf("%s, %v, want ErrCommandError", got, err)
+	}
+	// That topic carries only the failure for Power3: a relay report or another command's failure there
+	// never answers it (Power3's own report comes on POWER3).
+	for name, payload := range map[string]string{
+		"a relay report":            `{"POWER3":"ON"}`,
+		"another command's failure": `{"Command":"Error","Input":"HOSTNAME x"}`,
+	} {
+		b := &fakeBus{}
+		b.onPub = func(b *fakeBus, p pub) { b.emit(mqttbus.KindPower, p.topic, "POWER", payload, false) }
+		if _, err := newChan(b).Do(t.Context(), plug(), "Power3 ON"); !errors.Is(err, tasmota.ErrTimeout) {
+			t.Errorf("%s: %v, want a timeout", name, err)
+		}
+	}
+}
+
+// Why: tele/<t>/STATE, SENSOR and the other kinds the bus decodes carry the same keys as replies (STATE
+// has POWER) and come on their own period; taken as an answer they would confirm a command the device
+// never answered. Only RESULT, STATUSn, POWERn, UPGRADE and the SetOption4 command topics answer.
+func TestOtherKindsNeverAnswerACommand(t *testing.T) {
+	b := &fakeBus{}
+	c := newChan(b)
+	b.onPub = func(_ *fakeBus, p pub) {
+		for _, k := range []mqttbus.Kind{mqttbus.KindState, mqttbus.KindSensor, mqttbus.KindDiscovery} {
+			c.onMessage(mqttbus.Message{Kind: k, Topic: p.topic, Suffix: "STATE", Payload: []byte(`{"POWER":"ON"}`)})
+		}
+	}
+	if _, err := c.Do(t.Context(), plug(), "Power ON"); !errors.Is(err, tasmota.ErrTimeout) {
+		t.Fatalf("a periodic message answered Power: %v", err)
+	}
+	r, err := parseRequest("Power ON")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, k := range []mqttbus.Kind{mqttbus.KindLWT, mqttbus.KindState, mqttbus.KindSensor, mqttbus.KindStatus, mqttbus.KindDiscovery, mqttbus.KindInfo, mqttbus.KindFile} {
+		if _, ok := r.match(mqttbus.Message{Kind: k, Topic: "plug", Suffix: "POWER", Payload: []byte(`{"POWER":"ON"}`)}, true); ok {
+			t.Errorf("a %s message answered Power", k)
+		}
+	}
+}
+
+// Why (#648): Tasmota names the SetOption4 topic after the command as typed, so a command with '_'
+// (KNX: KnxTx_Cmnd) answers on stat/<t>/KNXTX_CMND; the channel compares that name like any other.
+// cmdpolicy does not let such a name be sent today; the match must still hold when it does.
+func TestSetOption4ReplyOfANameWithAnUnderscoreMatches(t *testing.T) {
+	r := &request{name: "KnxTx_Cmnd1", args: "1", base: baseOf("KnxTx_Cmnd1")}
+	m := mqttbus.Message{Kind: mqttbus.KindCommand, Topic: "plug", Suffix: "KNXTX_CMND", Payload: []byte(`{"KnxTx_Cmnd1":"1"}`)}
+	if v, ok := r.match(m, false); !ok || string(v.reply) != `{"KnxTx_Cmnd1":"1"}` {
+		t.Fatalf("not matched: %s, %v", v.reply, ok)
+	}
+	m.Suffix = "KNXTX_VAL"
+	if _, ok := r.match(m, false); ok {
+		t.Fatal("another KNX command's topic answered")
+	}
+}
+
 // Why: on shutdown a command in flight must not hold the process for its whole reply wait.
 func TestCloseWakesACommandInFlight(t *testing.T) {
 	b := &fakeBus{}

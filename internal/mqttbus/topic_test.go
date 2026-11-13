@@ -30,6 +30,9 @@ func TestDecode(t *testing.T) {
 		{"SO4 SetOption reply", "", def, "stat/a/SETOPTION", KindCommand, "a", "SETOPTION", true},
 		{"SO4 unknown command", "", def, "stat/a/COMMAND", KindCommand, "a", "COMMAND", true},
 		{"SO4 name with digits inside", "", def, "stat/a/I2CSCAN", KindCommand, "a", "I2CSCAN", true},
+		// KNX commands carry '_' (KnxTx_Cmnd, xdrv_11_knx.ino): their reply must not be dropped by the bus (#648).
+		{"SO4 name with an underscore", "", def, "stat/a/KNXTX_CMND", KindCommand, "a", "KNXTX_CMND", true},
+		{"a name does not end in an underscore", "", def, "stat/a/KNXTX_", "", "", "", false},
 		{"SO4 reply with a custom layout", "home/%prefix%/%topic%/", def, "home/stat/dev1/HOSTNAME", KindCommand, "dev1", "HOSTNAME", true},
 		{"lower case suffix is not Tasmota's", "", def, "stat/a/teleperiod", "", "", "", false},
 		{"suffix with a dash is not a command", "", def, "stat/a/my-rule", "", "", "", false},

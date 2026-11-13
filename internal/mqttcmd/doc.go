@@ -21,7 +21,10 @@
 //     {"Command":"Unknown"|"Error"} for that command). Button presses and other pollers are ignored.
 //     A device with SetOption4 1 publishes that reply on stat/<t>/<COMMAND> instead of RESULT (the
 //     name in upper case without its index, COMMAND for an unknown command, POWERn for a relay): it
-//     is accepted only on the pending command's own name, with the same key rules (#632).
+//     is accepted only on the pending command's own name, with the same key rules (#632). Upgrade answers
+//     on stat/<t>/UPGRADE, the topic of its download reports, and a failed Power3 on stat/<t>/POWER: only
+//     the immediate Upgrade reply ("Version X from <url>", "1 or >X to upgrade", "Safeboot") and only the
+//     Command Error answer there, never "Failed ..." or "Successful. Restarting" (#648).
 //   - A Backlog has no merged reply (Tasmota v16 publishes nothing for the Backlog itself and one
 //     RESULT per queued command): each queued command is collected on its own.
 //   - A device whose last LWT is Offline is not published to (ErrUnreachable: nothing was sent).

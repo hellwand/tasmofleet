@@ -56,6 +56,10 @@ func TestMQTTSetOption4RepliesOnTheCommandTopic(t *testing.T) {
 		{"SetOption19", "", `stat/so4-plug/SETOPTION={"SetOption19":`},
 		{"NoSuchCommand", "", `stat/so4-plug/COMMAND={"Command":"Unknown"`},
 		{"Power2", "ON", `stat/so4-plug/POWER2={"POWER2":"ON"}`}, // named after the relay, not the command
+		// #648: a relay the device does not have is a Command Error (CmndPower writes no response), on the
+		// command's name without its index; and Upgrade answers on UPGRADE, its download report's topic.
+		{"Power3", "ON", `stat/so4-plug/POWER={"Command":"Error","Input":"POWER3 ON"}`},
+		{"Upgrade", "", `stat/so4-plug/UPGRADE={"Upgrade":"1 or >`},
 	} {
 		if err := b.Publish("cmnd/so4-plug/"+tc.cmd, []byte(tc.payload), false); err != nil {
 			t.Fatal(err)

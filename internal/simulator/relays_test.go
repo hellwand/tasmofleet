@@ -33,7 +33,9 @@ func TestMultiRelayStatusAndPower(t *testing.T) {
 			t.Errorf("relay %d still ON after Power0 OFF", i+1)
 		}
 	}
-	if got := cm(t, d, "Power4 ON"); !strings.Contains(got, "Unknown") {
+	// Power exists, so a missing relay is a Command Error, not Unknown: CmndPower writes no response and
+	// ExecuteCommand fills in the error (v15.6.0 support_command.ino:491-507, #648).
+	if got := cm(t, d, "Power4 ON"); got != `{"Command":"Error","Input":"POWER4 ON"}` {
 		t.Errorf("relay 4 of a 3 relay device: %s", got)
 	}
 }

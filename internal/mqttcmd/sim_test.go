@@ -202,3 +202,73 @@ func TestSwitchingSetOption4OverMQTTKeepsTheChannelWorking(t *testing.T) {
 		}
 	}
 }
+
+// Why (#648): the real chain (broker, bus, simulator) for a device with SetOption4 1. Its Upgrade
+// replies come on stat/<t>/UPGRADE and are answered at once: the bare read and the "Version X from
+// <url>" of Upgrade 1 that the OTA engine checks the URL with (#504). The download's own report on
+// that topic ("Failed ...", here: the firmware server is unreachable) arrives when nothing is in
+// flight; the channel ignores it, the next Upgrade gets its own reply, and every other subscriber
+// of the bus (the OTA engine's hint in app/ota.go) still receives the report.
+func TestSetOption4DeviceAnswersUpgradeAtOnce(t *testing.T) {
+	e := newSimEnv(t, simulator.DeviceSpec{
+		Settings: map[string]string{"setoption4": "1"},
+		Faults:   []simulator.Fault{{Kind: simulator.FaultFWUnreachable, Duration: 100 * time.Millisecond}},
+	})
+	e.waitConnected(t)
+	reports := make(chan string, 8)
+	off := e.bus.Subscribe([]mqttbus.Kind{mqttbus.KindUpgrade}, func(m mqttbus.Message) {
+		select {
+		case reports <- string(m.Payload):
+		default:
+		}
+	})
+	t.Cleanup(off)
+	ch := New(e.bus, Options{Gap: 5 * time.Millisecond, ReplyWait: 4 * time.Second})
+	t.Cleanup(ch.Close)
+	start := time.Now()
+	if raw, err := ch.Do(t.Context(), e.dvc, "Upgrade"); err != nil || !strings.Contains(string(raw), "1 or >15.1.0 to upgrade") {
+		t.Fatalf("Upgrade: %s, %v", raw, err)
+	}
+	if raw, err := ch.Do(t.Context(), e.dvc, "Upgrade 1"); err != nil || !strings.Contains(string(raw), `"Version 15.1.0 from http://`) {
+		t.Fatalf("Upgrade 1: %s, %v", raw, err)
+	}
+	if d := time.Since(start); d > 3*time.Second {
+		t.Errorf("the Upgrade replies took %v: they waited for the reply timeout", d)
+	}
+	deadline := time.After(10 * time.Second)
+	for failed := false; !failed; {
+		select {
+		case r := <-reports:
+			failed = strings.Contains(r, "Failed")
+		case <-deadline:
+			t.Fatal("the download report never reached the other subscriber")
+		}
+	}
+	if raw, err := ch.Do(t.Context(), e.dvc, "Upgrade"); err != nil || !strings.Contains(string(raw), "1 or >") {
+		t.Fatalf("Upgrade after the report: %s, %v", raw, err)
+	}
+}
+
+// Why (#648): Power3 on a two-relay device is refused by Tasmota with {"Command":"Error"} at once. With
+// SetOption4 1 that reply comes on stat/<t>/POWER (the command's name without its index) and must end
+// the command as ErrCommandError, as it does on RESULT, instead of an unknown outcome after the timeout.
+func TestPowerForAMissingRelayIsACommandError(t *testing.T) {
+	for _, so4 := range []string{"1", "0"} {
+		t.Run("SetOption4 "+so4, func(t *testing.T) {
+			e := newSimEnv(t, simulator.DeviceSpec{Relays: 2, Settings: map[string]string{"setoption4": so4}})
+			e.waitConnected(t)
+			ch := New(e.bus, Options{Gap: 5 * time.Millisecond, ReplyWait: 4 * time.Second})
+			t.Cleanup(ch.Close)
+			start := time.Now()
+			if raw, err := ch.Do(t.Context(), e.dvc, "Power3 ON"); !errors.Is(err, tasmota.ErrCommandError) {
+				t.Fatalf("Power3 ON: %s, %v, want ErrCommandError", raw, err)
+			}
+			if d := time.Since(start); d > 3*time.Second {
+				t.Errorf("the refusal took %v: it waited for the reply timeout", d)
+			}
+			if raw, err := ch.Do(t.Context(), e.dvc, "Power2 ON"); err != nil || !strings.Contains(string(raw), `"POWER2":"ON"`) {
+				t.Fatalf("Power2 ON: %s, %v", raw, err)
+			}
+		})
+	}
+}

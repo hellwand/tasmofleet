@@ -175,18 +175,38 @@ func (r *request) match(m mqttbus.Message, loose bool) (v verdict, ok bool) {
 	// topic after the command as typed (upper case, index cut off: SO19 is SO), or COMMAND for an unknown one
 	// (support_command.ino:517). Such a reply is read like a RESULT, but only on the topic of this command:
 	// a rule's own stat topic or another poller's command never answers it.
-	onCommand := m.Kind == mqttbus.KindCommand
-	switch {
-	case m.Kind == mqttbus.KindResult:
-	case onCommand:
-		if !strings.EqualFold(m.Suffix, r.typed()) && m.Suffix != "COMMAND" {
-			return verdict{}, false
+	failOnly := false // the topic carries nothing but a failed command for r
+	switch m.Kind {
+	case mqttbus.KindResult:
+	case mqttbus.KindCommand:
+		if !strings.EqualFold(m.Suffix, r.typed()) {
+			if m.Suffix != "COMMAND" {
+				return verdict{}, false
+			}
+			failOnly = true
 		}
-	case m.Kind == mqttbus.KindPower:
+	case mqttbus.KindPower:
 		// Power with SetOption4 1 and SetOption90 1: the JSON {"POWER1":"ON"} alone, on stat/<t>/POWER1.
-		if r.base != "power" || !keyNames(m.Suffix, r.name, r.base) {
+		if r.base != "power" {
 			return verdict{}, false
 		}
+		if !keyNames(m.Suffix, r.name, r.base) {
+			// A failed Power3 (no third relay) is published on the command's name without its index,
+			// stat/<t>/POWER (#648); that topic is relay 1's otherwise, so it carries only the failure for r.
+			if !strings.EqualFold(m.Suffix, r.typed()) {
+				return verdict{}, false
+			}
+			failOnly = true
+		}
+	case mqttbus.KindUpgrade:
+		// SetOption4 1: Upgrade answers on stat/<t>/UPGRADE (#648), where the device later reports its
+		// download too. Only the immediate reply answers; a report never does (safety rule 3: the engine
+		// must get the URL echo or nothing).
+		if r.base != "upgrade" || !upgradeReply(m.Payload) {
+			return verdict{}, false
+		}
+	case mqttbus.KindLWT, mqttbus.KindState, mqttbus.KindSensor, mqttbus.KindStatus, mqttbus.KindDiscovery, mqttbus.KindInfo, mqttbus.KindFile:
+		return verdict{}, false // never a command's reply here (STATUSn was decided above)
 	default:
 		return verdict{}, false
 	}
@@ -212,8 +232,8 @@ func (r *request) match(m mqttbus.Message, loose bool) (v verdict, ok bool) {
 		}
 		return verdict{err: tasmota.ErrCommandError}, true
 	}
-	if onCommand && !strings.EqualFold(m.Suffix, r.typed()) {
-		return verdict{}, false // stat/<t>/COMMAND carries nothing but a failed command
+	if failOnly {
+		return verdict{}, false // stat/<t>/COMMAND, or POWER for an indexed Power, carries nothing but a failed command
 	}
 	if r.status != "" {
 		return verdict{}, false // a Status answers on STATUSn; any other RESULT is noise
@@ -239,6 +259,22 @@ func (r *request) match(m mqttbus.Message, loose bool) (v verdict, ok bool) {
 		return verdict{reply: m.Payload}, true
 	}
 	return verdict{}, false
+}
+
+// upgradeReply reports an immediate reply of CmndUpgrade (v15.6.0 support_command.ino:1325-1349): "Version X
+// from <url>" when the download starts, "1 or >X to upgrade" when it does not, "Safeboot" for Upgrade 2 on an
+// ESP32. The download's own reports on the same topic, "Failed ..." and "Successful. Restarting"
+// (support_tasmota.ino:1530), are not replies; neither is anything else, so an unknown text is never taken.
+func upgradeReply(payload []byte) bool {
+	var m map[string]json.RawMessage
+	if json.Unmarshal(payload, &m) != nil || len(m) != 1 {
+		return false
+	}
+	var s string
+	if json.Unmarshal(m["Upgrade"], &s) != nil {
+		return false
+	}
+	return strings.HasPrefix(s, "Version ") || strings.HasPrefix(s, "1 or >") || s == "Safeboot"
 }
 
 // templateShape reports the reply of a bare Template (TemplateJson, v16 support.ino): NAME as text and

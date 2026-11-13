@@ -124,7 +124,7 @@ func New(bus mqttbus.Bus, o Options) *Channel {
 		o.FileTotal = DefaultFileTotal
 	}
 	c := &Channel{bus: bus, o: o, lwt: map[string]string{}, info: map[string]*Info{}, sems: map[string]chan struct{}{}, waiters: map[string]*waiter{}, files: map[string]chan mqttbus.Message{}, fileClean: map[string]bool{}, pubs: map[string]int{}, reboots: map[string]int{}, fwPending: map[string]int{}, done: make(chan struct{})}
-	c.unsub = bus.Subscribe([]mqttbus.Kind{mqttbus.KindLWT, mqttbus.KindInfo, mqttbus.KindResult, mqttbus.KindStatus, mqttbus.KindPower, mqttbus.KindCommand, mqttbus.KindFile}, c.onMessage)
+	c.unsub = bus.Subscribe([]mqttbus.Kind{mqttbus.KindLWT, mqttbus.KindInfo, mqttbus.KindResult, mqttbus.KindStatus, mqttbus.KindPower, mqttbus.KindCommand, mqttbus.KindUpgrade, mqttbus.KindFile}, c.onMessage)
 	return c
 }
 
@@ -400,7 +400,9 @@ func (c *Channel) onMessage(m mqttbus.Message) {
 		c.onLWT(m)
 	case mqttbus.KindInfo:
 		c.onInfo(m)
-	case mqttbus.KindResult, mqttbus.KindStatus, mqttbus.KindPower, mqttbus.KindCommand:
+	case mqttbus.KindResult, mqttbus.KindStatus, mqttbus.KindPower, mqttbus.KindCommand, mqttbus.KindUpgrade:
+		// KindUpgrade: the Upgrade reply of a SetOption4 1 device (#648). The download reports on the same
+		// topic reach the waiter too and are refused by match; the bus hands them to every other subscriber.
 		if m.Retained {
 			return // old news, never an answer
 		}
@@ -415,7 +417,7 @@ func (c *Channel) onMessage(m mqttbus.Message) {
 		}
 	case mqttbus.KindFile:
 		c.onFile(m)
-	case mqttbus.KindState, mqttbus.KindSensor, mqttbus.KindDiscovery, mqttbus.KindUpgrade:
+	case mqttbus.KindState, mqttbus.KindSensor, mqttbus.KindDiscovery:
 		// not subscribed
 	}
 }

@@ -652,6 +652,10 @@ answer. Rules (each has a test; see also `docs/research/tasmota-mqtt-transport.m
   or `{"Command":"Unknown"|"Error"}` for that command. Other messages on the topic (button
   presses, other pollers) are ignored. `DoLoose` (console) takes the first `RESULT` for
   `Template` and `Gpios` only.
+- A device with `SetOption4 1` answers on `stat/<t>/<COMMAND>` instead of `RESULT` (#632); `Upgrade` answers on
+  `stat/<t>/UPGRADE`, where the device later reports its download, so only the immediate reply (`Version X from <url>`,
+  `1 or >X to upgrade`, `Safeboot`) answers it and never `Failed ...` or `Successful. Restarting`, and a failed `Power3`
+  answers with its Command Error on `stat/<t>/POWER` (#648).
 - A Backlog has no merged reply over MQTT: one `RESULT` per queued command is collected and
   merged (later keys win).
 - LWT Offline -> `tasmota.ErrUnreachable`, nothing published. No answer in 8 s -> `tasmota.ErrTimeout`
