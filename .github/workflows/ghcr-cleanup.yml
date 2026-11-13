@@ -37,7 +37,7 @@ permissions:
 jobs:
   cleanup:
     name: prune images
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     # Docker Hub credentials live only in the `dockerhub` environment (#693), whose deployment policy
     # allows main and v* tags. Every other ref (pull requests, a dispatch from a branch) runs without
     # the environment and so without the secrets. A caller job cannot set `environment`, so it is set here.

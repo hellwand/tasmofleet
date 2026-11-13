@@ -51,7 +51,7 @@ jobs:
 
   race:
     name: unit tests (race detector, ${{ matrix.shard }})
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     timeout-minutes: 45
     strategy:
       fail-fast: false
@@ -79,7 +79,7 @@ jobs:
   quarantine:
     name: quarantined tests (retries, not blocking)
     continue-on-error: true
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     timeout-minutes: 30
     container:
       image: mcr.microsoft.com/playwright:v1.65.0-noble@sha256:9beb546099e11f52d62e505537914870e01a67e0e6b00ae41da4775324e73dbe
@@ -113,7 +113,7 @@ jobs:
   # never runs on pull requests. No secrets; the passwords in the script are fake. Not published anywhere.
   ha-app:
     name: Home Assistant app in a Supervisor (devcontainer)
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1

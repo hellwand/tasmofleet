@@ -43,7 +43,7 @@ permissions:
 jobs:
   image:
     name: build image (${{ inputs.mode }})
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     timeout-minutes: 30
     # Docker Hub credentials live only in the `dockerhub` environment (#693), whose deployment policy
     # allows main and v* tags. Every other ref (pull requests, a dispatch from a branch) runs without

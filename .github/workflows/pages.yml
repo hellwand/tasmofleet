@@ -19,7 +19,7 @@ env:
 jobs:
   build:
     name: build the website and the demo
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     timeout-minutes: 30
     container:
       # Browsers in this image match @playwright/test in e2e/package.json; bump both together (as in _checks.yml).
@@ -53,7 +53,7 @@ jobs:
   deploy:
     name: deploy to GitHub Pages
     needs: build
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     timeout-minutes: 10
     # One deployment at a time (a job-level group: this workflow is also called by release.yml).
     concurrency:

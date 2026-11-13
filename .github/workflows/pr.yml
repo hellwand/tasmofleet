@@ -46,7 +46,7 @@ env:
 jobs:
   changes:
     name: changes
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     timeout-minutes: 5
     outputs:
       code: ${{ steps.classify.outputs.code }}
@@ -127,7 +127,7 @@ jobs:
   # No condition: it also runs for a code PR, whose change can delete a file that a document links to.
   links:
     name: relative Markdown links
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -139,7 +139,7 @@ jobs:
   # deleted. Runs on every PR (a docs-only PR cannot touch them, the check is a second) and is part of "required".
   migrations:
     name: migrations append-only
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -152,7 +152,7 @@ jobs:
   # no surprise. No new section: passes at once. Part of "required".
   release-section:
     name: release section guards
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -169,7 +169,7 @@ jobs:
   changelog-fragment:
     name: changelog fragment
     needs: changes
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     timeout-minutes: 5
     permissions:
       contents: read
@@ -228,7 +228,7 @@ jobs:
     name: required
     needs: [changes, checks, links, migrations, release-section, changelog-fragment, image]
     if: always()
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     timeout-minutes: 5
     steps:
       - name: all gates passed

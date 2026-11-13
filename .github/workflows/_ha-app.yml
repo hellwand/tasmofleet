@@ -16,7 +16,7 @@ permissions:
 jobs:
   ha-app:
     name: Home Assistant app image (build and test, not published)
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     timeout-minutes: 30
     permissions:
       contents: read

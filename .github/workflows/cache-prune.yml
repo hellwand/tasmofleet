@@ -33,7 +33,7 @@ permissions:
 jobs:
   prune:
     name: prune go caches
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     timeout-minutes: 10
     # Three callers can overlap (a push, the nightly, the weekly run); the deletes are idempotent, but run one at a time.
     concurrency:
