@@ -179,6 +179,42 @@ func readErrorText(err error) string {
 	return "The device could not be read."
 }
 
+// readFailure names why a Settings read failed in a few fixed words for the log. It is a class and
+// never the error text: that text can hold what the device answered (safety rule 4).
+func readFailure(err error) string {
+	switch {
+	case errors.Is(err, settings.ErrNoMAC):
+		return "no-mac"
+	case errors.Is(err, tasmota.ErrAuth):
+		return "auth"
+	case errors.Is(err, tasmota.ErrHTTPAPIRefused):
+		return "http-api-refused"
+	case errors.Is(err, tasmota.ErrUnreachable):
+		return "unreachable"
+	case errors.Is(err, tasmota.ErrTimeout):
+		return "timeout"
+	case errors.Is(err, tasmota.ErrBadResponse):
+		return "bad-response"
+	}
+	return "other"
+}
+
+// logReadFailure writes the one line that tells the operator which query of which device failed
+// and why (#712); the page keeps its fixed sentence. The command is a name from the curated list,
+// the reason a class: no value and no credential can reach the log (safety rule 4). A cancelled
+// request is the person leaving, not a failing device.
+func (h *handler) logReadFailure(r *http.Request, id model.DeviceID, err error) {
+	if errors.Is(err, context.Canceled) {
+		return
+	}
+	attrs := []any{"device", id, "reason", readFailure(err)}
+	var re *settings.ReadError
+	if errors.As(err, &re) {
+		attrs = append(attrs, "cmd", re.Cmd)
+	}
+	h.log.WarnContext(r.Context(), "device settings: read failed", attrs...)
+}
+
 // settingsTabPage is GET /devices/{id}/settings: the tab with its header at once. With values
 // remembered from an earlier read it shows them with their age and fetches fresh ones in the
 // background (#599); without, a loading state. The device is read by settingsForm, which the page
@@ -208,6 +244,9 @@ func (h *handler) settingsForm(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	cur, err := h.d.Settings.Read(r.Context(), d.ID)
+	if err != nil {
+		h.logReadFailure(r, d.ID, err)
+	}
 	p := settingsPage{Device: d}
 	status := http.StatusOK
 	now := h.d.Clock.Now()

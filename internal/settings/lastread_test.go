@@ -455,3 +455,25 @@ func TestValuesOfAnotherDeviceAreNotRemembered(t *testing.T) {
 		t.Fatalf("the stored device's values must be remembered: %v %v", s, ok)
 	}
 }
+
+// Why (#712): a failed read must say which query failed, as data and not only as text, so that the page
+// can put the command into the log without parsing a message. The text stays what it was and the
+// device error stays reachable for errors.Is (the page picks its sentence from it).
+func TestFailedReadNamesTheCommandThatFailed(t *testing.T) {
+	c := &fakeClient{errs: map[string]error{"Hostname": tasmota.ErrTimeout}}
+	m := New(Options{Devices: fakeDevices{}, Client: c})
+	_, err := m.Read(context.Background(), 1)
+	var re *ReadError
+	if !errors.As(err, &re) {
+		t.Fatalf("Read = %v, want a *ReadError", err)
+	}
+	if re.Cmd != "Hostname" {
+		t.Errorf("ReadError.Cmd = %q, want the query that failed", re.Cmd)
+	}
+	if !errors.Is(err, tasmota.ErrTimeout) {
+		t.Errorf("the device error is lost: %v", err)
+	}
+	if want := "read Hostname: " + tasmota.ErrTimeout.Error(); err.Error() != want {
+		t.Errorf("error text %q, want %q", err.Error(), want)
+	}
+}

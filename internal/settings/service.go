@@ -32,6 +32,17 @@ var (
 	ErrNoMAC = errors.New("settings: the device answers without a MAC (minimal firmware)")
 )
 
+// ReadError is a failed read of one device query. Cmd is the query that was sent, so a log line can
+// name it without parsing the text; the text is "read <Cmd>: <device error>" and the device error
+// stays reachable for errors.Is.
+type ReadError struct {
+	Cmd string
+	Err error
+}
+
+func (e *ReadError) Error() string { return "read " + e.Cmd + ": " + e.Err.Error() }
+func (e *ReadError) Unwrap() error { return e.Err }
+
 // ValidationError lists every rejected field of one Apply call. When it is
 // returned nothing was sent to the device.
 type ValidationError struct{ Fields map[string]string }
@@ -164,7 +175,7 @@ func (m *Manager) readKeys(ctx context.Context, id model.DeviceID, keys []string
 			if !done {
 				raw, err := m.o.Client.Command(ctx, t, src.cmd)
 				if err != nil && !errors.Is(err, tasmota.ErrUnknownCommand) {
-					return out, fmt.Errorf("read %s: %w", src.cmd, err)
+					return out, &ReadError{Cmd: src.cmd, Err: err}
 				}
 				if err == nil {
 					_ = json.Unmarshal(raw, &sections) // unparsable: sections stays nil, values stay unknown
@@ -187,7 +198,7 @@ func (m *Manager) readKeys(ctx context.Context, id model.DeviceID, keys []string
 		case errors.Is(err, tasmota.ErrUnknownCommand):
 			continue
 		case err != nil:
-			return out, fmt.Errorf("read %s: %w", k, err)
+			return out, &ReadError{Cmd: k, Err: err}
 		}
 		if Generic(k) {
 			raw = cmdpolicy.ScrubReply(raw) // an uncurated reply may hold anything
