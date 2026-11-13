@@ -10,7 +10,9 @@ configured on the System settings page after the first sign-in and stored in the
 
 - Variables carry the prefix `TASMOFLEET_`. The same keys (prefix optional) may be written to
   `/data/tasmofleet.env` as `KEY=value` lines; a real environment variable wins over the file.
-  Another file can be named with `TASMOFLEET_CONFIG_FILE`.
+  Another file can be named with `TASMOFLEET_CONFIG_FILE`. In the environment the prefix is
+  required: a sign-in variable without it (`AUTH_MODE`, `PUBLIC_URL`, `OIDC_*`, `ADMIN_GROUPS`,
+  `OPERATOR_GROUPS`) is ignored, and the start log warns once per variable and names the key that works.
 - **An empty value counts as not set.** `KEY=` (which is what Unraid passes for an unfilled
   template field) means: use the default and lock nothing.
 - Secrets can also be given as `<KEY>_FILE`, the path of a file that holds the value (Docker

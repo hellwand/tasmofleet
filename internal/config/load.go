@@ -143,7 +143,49 @@ func Load(environ []string) (Config, error) {
 	if v, set := env["SNAPSHOT_INTERVAL"]; set {
 		c.Warnings = append(c.Warnings, Prefix+"SNAPSHOT_INTERVAL is set ("+v+") but no longer exists and is ignored (removed in 0.34: database snapshots run on chosen weekdays at a time of day, set on System, Snapshots; an interval stored in the database became daily 03:00). Delete it.")
 	}
+	c.Warnings = append(c.Warnings, unprefixedSignInWarnings(environ)...)
 	return c, c.validate()
+}
+
+// signInKeys are the sign-in settings without the prefix, in field order: AUTH_MODE, PUBLIC_URL, every
+// OIDC_* key, the group lists and the _FILE variant of each secret among them. Read from the field
+// tags, so a new OIDC_* key is covered without a second list.
+func signInKeys() []string {
+	var keys []string
+	rt := reflect.TypeFor[Config]()
+	for i := range rt.NumField() {
+		f := rt.Field(i)
+		k := f.Tag.Get("env")
+		switch {
+		case k == "AUTH_MODE", k == "PUBLIC_URL", k == "ADMIN_GROUPS", k == "OPERATOR_GROUPS", strings.HasPrefix(k, "OIDC_"):
+			keys = append(keys, k)
+			if f.Tag.Get("secret") == "true" {
+				keys = append(keys, k+"_FILE")
+			}
+		}
+	}
+	return keys
+}
+
+// unprefixedSignInWarnings is one warning per sign-in variable that is set in the environment without
+// the TASMOFLEET_ prefix (#721). Such a variable is not read at all, so it silently does nothing; the
+// warning names the key that works and never the value. Other unprefixed names are not ours and stay
+// silent, and so do short names in the env file, where the prefix is optional. An empty value counts
+// as not set, like everywhere else.
+func unprefixedSignInWarnings(environ []string) []string {
+	set := map[string]bool{}
+	for _, kv := range environ {
+		if k, v, ok := strings.Cut(kv, "="); ok && strings.TrimSpace(v) != "" {
+			set[k] = true
+		}
+	}
+	var out []string
+	for _, k := range signInKeys() {
+		if set[k] {
+			out = append(out, k+" is set in the environment without the "+Prefix+" prefix and is ignored; the name that works is "+Prefix+k+". The value is not used.")
+		}
+	}
+	return out
 }
 
 // tlsSelfSignedWarning explains what happens to a TASMOFLEET_TLS_SELF_SIGNED value
