@@ -124,6 +124,66 @@ test("Discovered: ignore, show ignored, restore, and Add… prefills the manual 
   await expect(box(page, "manual")).toContainText("Prefilled from MQTT discovery");
 });
 
+// Why (#714): Dismiss is offered on an address change and on a conflict, so Restore must be too. Show ignored
+// counts and lists them in their own section (never under New devices) with Restore as the only action.
+test("Discovered: a dismissed address change and conflict are counted, listed and restored", async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 900 });
+  const { DatabaseSync } = await import("node:sqlite");
+  const db = new DatabaseSync(join(app.dataDir, "tasmofleet.db"));
+  const macs = ["aa:bb:cc:00:03:01", "aa:bb:cc:00:03:02"];
+  try {
+    db.exec("PRAGMA busy_timeout=5000");
+    const now = Date.now();
+    db.prepare(
+      `INSERT INTO devices (id, name, address, port, mac, created_at, updated_at) VALUES (9714, 'Garage plug', '127.0.0.31', 80, ?, ?, ?)`,
+    ).run(macs[0], now, now);
+    for (const [mac, kind, ip] of [[macs[0], "address-change", "127.0.0.32"], [macs[1], "conflict", "127.0.0.33"]]) {
+      db.prepare(
+        `INSERT INTO discovery_proposals (mac, kind, via, name, address, port, existing_id, dismissed, first_seen, seen_at)
+         VALUES (?, ?, 'mqtt', 'Claimed', ?, 80, 9714, 0, ?, ?)`,
+      ).run(mac, kind, ip, now - 3600_000, now - 30_000);
+    }
+  } finally {
+    db.close();
+  }
+  try {
+    const disc = box(page, "discovered");
+    const section = (name: string) => disc.locator(`section[aria-label="${name}"]`);
+    await page.goto(app.url + "/devices/new");
+    await section("Address changed").getByRole("button", { name: "Dismiss" }).click();
+    await section("Conflicts").getByRole("button", { name: "Dismiss" }).click();
+    await expect(section("Address changed")).toHaveCount(0);
+    await expect(section("Conflicts")).toHaveCount(0);
+    const showIgn = disc.getByRole("checkbox", { name: /Show ignored/ });
+    await expect(showIgn).toContainText("Show ignored (2)");
+    await showIgn.click();
+    for (const name of ["Address changed", "Conflicts"]) {
+      await expect(section(name), `${name} lists the dismissed row`).toContainText("Ignored");
+      await expect(section(name).getByRole("button", { name: "Restore" })).toHaveCount(1);
+      await expect(section(name).getByRole("button", { name: /Dismiss|Apply/ })).toHaveCount(0);
+    }
+    await expect(disc.locator("form.add-newdev").getByRole("button", { name: "Restore" }), "never listed under New devices").toHaveCount(0);
+    await section("Address changed").getByRole("button", { name: "Restore" }).click();
+    await expect(page.getByText("Restored.")).toBeVisible();
+    await expect(showIgn, "Restore keeps the switch on").toHaveAttribute("aria-checked", "true");
+    await expect(section("Address changed")).toContainText("Address changed (1)");
+    await expect(section("Address changed").getByRole("button", { name: "Dismiss" })).toBeVisible();
+    await section("Conflicts").getByRole("button", { name: "Restore" }).click();
+    await expect(section("Conflicts")).toContainText("Conflicts (1)");
+    await expect(showIgn).toContainText("Show ignored (0)");
+    await expectNoOverflow(page, "Add devices with restored moves");
+  } finally {
+    const db2 = new DatabaseSync(join(app.dataDir, "tasmofleet.db"));
+    try {
+      db2.exec("PRAGMA busy_timeout=5000");
+      db2.prepare("DELETE FROM discovery_proposals WHERE mac IN (?, ?)").run(macs[0], macs[1]);
+      db2.prepare("DELETE FROM devices WHERE id = 9714").run();
+    } finally {
+      db2.close();
+    }
+  }
+});
+
 // Why: Scan now stays one click, and the scan runs live where its results are: the results page. The box
 // then says in one line what the last scan found, WHEN (a date stamp, not a bare clock time) and links all results.
 test("Network scan: Scan now opens the live results, the box keeps a one-line summary with All results", async ({ page }) => {

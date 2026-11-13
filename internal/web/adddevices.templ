@@ -382,24 +382,36 @@ templ unidentSection(rows []moveRow) {
 }
 
 // moveSection lists known devices that reported a new address (or a conflict): Dismiss, and
-// Apply where the move can be confirmed here.
+// Apply where the move can be confirmed here. With "Show ignored" the dismissed ones follow, marked
+// and with Restore as their only action; the heading counts only the open ones, like New devices.
 templ moveSection(title, sub string, rows []moveRow, p discView) {
 	<section class="add-moves" aria-label={ title }>
 		<div class="add-moves-head">
-			<h2>{ title } ({ strconv.Itoa(len(rows)) })</h2>
+			<h2>{ title } ({ strconv.Itoa(openMoves(rows)) })</h2>
 			<div class="add-moves-sub">{ sub }</div>
 		</div>
 		for _, m := range rows {
 			<form class="add-move" method="post" action={ templ.SafeURL(p.Base + "/discovery/proposals/" + strconv.FormatInt(m.ID, 10) + "/accept") }>
 				<input type="hidden" name="csrf" value={ p.CSRF }/>
 				<input type="hidden" name="version" value={ m.Version }/>
+				<input type="hidden" name="state" value={ p.State }/>
+				<input type="hidden" name="sort" value={ p.Sort }/>
+				<input type="hidden" name="dir" value={ p.Dir }/>
+				if p.ShowIgn {
+					<input type="hidden" name="ignored" value="1"/>
+				}
 				<span class="add-move-name">
 					if m.Href != "" {
 						<a href={ templ.SafeURL(m.Href) }>{ m.Name }</a>
 					} else {
 						<span>{ m.Name }</span>
 					}
-					<span class="add-move-seen"><time datetime={ m.Seen.UTC().Format("2006-01-02T15:04:05Z") }>{ m.SeenText }</time></span>
+					<span class="add-move-seen">
+						if m.Ignored {
+							@ui.Badge(ui.ToneNeutral, "Ignored")
+						}
+						<time datetime={ m.Seen.UTC().Format("2006-01-02T15:04:05Z") }>{ m.SeenText }</time>
+					</span>
 				</span>
 				<span class="add-move-addr mono">
 					if m.Old != "" {
@@ -409,9 +421,13 @@ templ moveSection(title, sub string, rows []moveRow, p discView) {
 				</span>
 				<span class="add-move-why">{ m.Why }</span>
 				<span class="btn-row add-move-acts">
-					<button type="submit" class="btn" formaction={ templ.SafeURL(p.Base + "/discovery/proposals/" + strconv.FormatInt(m.ID, 10) + "/dismiss") }>Dismiss</button>
-					if m.CanApply {
-						<button type="submit" class="btn btn-primary">Apply</button>
+					if m.Ignored {
+						<button type="submit" class="btn" formaction={ templ.SafeURL(p.Base + "/discovery/proposals/" + strconv.FormatInt(m.ID, 10) + "/undismiss") }>Restore</button>
+					} else {
+						<button type="submit" class="btn" formaction={ templ.SafeURL(p.Base + "/discovery/proposals/" + strconv.FormatInt(m.ID, 10) + "/dismiss") }>Dismiss</button>
+						if m.CanApply {
+							<button type="submit" class="btn btn-primary">Apply</button>
+						}
 					}
 				</span>
 			</form>

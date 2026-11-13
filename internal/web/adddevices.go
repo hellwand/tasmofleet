@@ -228,6 +228,18 @@ func sortHeader(p discView, key string) (href, class, aria string) {
 	return discHref(p.Base, p.State, key, dir, p.ShowIgn), class, aria
 }
 
+// openMoves counts the rows that are not dismissed: the heading of an Address changed or Conflicts
+// section counts what waits for a decision, not the ignored rows listed after them.
+func openMoves(rows []moveRow) int {
+	n := 0
+	for _, m := range rows {
+		if !m.Ignored {
+			n++
+		}
+	}
+	return n
+}
+
 // showIgnoredHref is the "Show ignored" switch: a link to the other state.
 func showIgnoredHref(p discView) string {
 	return discHref(p.Base, p.State, p.Sort, p.Dir, !p.ShowIgn)
