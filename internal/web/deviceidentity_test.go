@@ -45,8 +45,30 @@ func TestIdentityCardShowsStatusFWRRawAndTasmoFleetsReadingApart(t *testing.T) {
 			t.Errorf("Identity card lacks %q:\n%s", want, shortDump(card))
 		}
 	}
-	if n := strings.Count(card, `class="info"`); n != 7 {
+	if n := strings.Count(card, `class="uinfo"`); n != 7 {
 		t.Errorf("%d info icons, want one per StatusFWR field (7)", n)
+	}
+	// Why (#680): the explanations must be reachable by a tap. A title attribute is not (a phone
+	// has no hover and the tooltip script never opens for touch), so each icon opens a native
+	// popover (ui.Info) whose id is unique to its field: popovertarget finds its popover by id, so
+	// a shared id would open another field's text.
+	if strings.Contains(card, `class="info"`) {
+		t.Error("an Identity info icon still keeps its text in a title attribute, which a tap never shows")
+	}
+	for name, info := range map[string]string{
+		"Version": "The firmware version and its build in brackets",
+		"CR":      "Characters used / available in the settings text area",
+	} {
+		id := `id="fwr-info-` + name + `" popover`
+		if strings.Count(card, id) != 1 {
+			t.Errorf("want exactly one popover %q for %s in the Identity card", id, name)
+		}
+		if strings.Count(card, `popovertarget="fwr-info-`+name+`"`) != 1 {
+			t.Errorf("the %s icon does not open its own popover", name)
+		}
+		if !strings.Contains(card, info) {
+			t.Errorf("the %s explanation %q is not in the card", name, info)
+		}
 	}
 	if strings.Index(card, "TasmoFleet&#39;s reading") < strings.Index(card, "<dt>CR") {
 		t.Error("TasmoFleet's reading must come after, not inside, the StatusFWR fields")

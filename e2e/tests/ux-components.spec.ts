@@ -192,7 +192,7 @@ test("tooltips: short, never data lists, none on the Review update button", asyn
         const t = el.getAttribute("title") ?? el.getAttribute("data-tip") ?? "";
         if (t.length > 160) out.push(`long (${t.length}): ${el.tagName}.${el.className}`);
         if ((t.match(/[.!?](\s|$)/g) ?? []).length > 2) out.push(`more than two sentences: ${t.slice(0, 40)}`);
-        if (el.matches("button, a.button") && !el.matches(".info, .relay-btn") && el.textContent && /^(Preview|Start|Save|Delete|Add|Edit|Send)/.test(el.textContent.trim())) out.push(`self-explanatory button has a tooltip: ${el.textContent.trim()}`);
+        if (el.matches("button, a.button") && !el.matches(".relay-btn") && el.textContent && /^(Preview|Start|Save|Delete|Add|Edit|Send)/.test(el.textContent.trim())) out.push(`self-explanatory button has a tooltip: ${el.textContent.trim()}`);
       }
       return out;
     });

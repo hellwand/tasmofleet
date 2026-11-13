@@ -467,15 +467,16 @@ templ identityCard(c identCard) {
 }
 
 // identityFWR is the StatusFWR block of the Identity card (#289): the fields of Status 2 under
-// Tasmota's own names with the values as sent, each explained behind an info button (the
-// tooltip pattern of button.info), then TasmoFleet's own reading of them, kept apart.
+// Tasmota's own names with the values as sent, each explained behind an info button (ui.Info, a
+// popover that opens on a tap as well as on a click; the id is per field, #680), then
+// TasmoFleet's own reading of them, kept apart.
 templ identityFWR(c identCard) {
 	<h3 class="ukv-h">Reported by the device <span class="ukv-sub">Status 2 · StatusFWR</span></h3>
 	if len(c.FWR) > 0 {
 		<dl class="ukv">
 			for _, r := range c.FWR {
 				<div class={ "ukv-row", templ.KV("ukv-wide", r.Wide) }>
-					<dt>{ r.Name } <button type="button" class="info" title={ r.Info } aria-label={ r.Name + ": " + r.Info }><span aria-hidden="true">i</span></button></dt>
+					<dt>{ r.Name } @ui.Info("fwr-info-"+r.Name, r.Name, r.Info)</dt>
 					<dd class="mono">{ r.Value }</dd>
 				</div>
 			}
