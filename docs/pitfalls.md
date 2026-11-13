@@ -13,9 +13,9 @@ means nothing stops you: you have to know it. The full working rules are in
   unsigned commits, so `main` got two of them and had to be repaired by hand.
 - **Rule:** merge only by a fast-forward push of the green PR head
   (`git push origin <branch>:main`). Never use a merge button.
-- **Enforced:** ruleset `main` (signed commits, linear history, `required`); ruleset
-  `main: CI must be green (no bypass)` (`required`, no admin bypass). The button still exists, so
-  the rule is also a convention.
+- **Enforced:** ruleset `main: CI must be green (no bypass)` (signed commits, linear history, `required`;
+  no admin bypass since #787, so the button's unsigned commits are refused for the maintainer too). The
+  button still exists, so the rule is also a convention.
 
 ### Local gates ignored uncommitted work (#481)
 
@@ -146,7 +146,9 @@ means nothing stops you: you have to know it. The full working rules are in
   secret, including later ones.
 - **Rule:** pin third-party actions to a full commit SHA with the version in a
   comment. Reusable workflows take secrets by name, never `inherit`.
-- **Enforced:** Renovate keeps the pins current; otherwise convention and review.
+- **Enforced:** the repository setting "require actions to be pinned to a full-length commit SHA" (#787):
+  a workflow using an unpinned third-party action fails; Renovate keeps the pins current. `secrets: inherit` is
+  convention and review.
 
 ### Environment secrets did not reach a called workflow (#694, #696, #693)
 

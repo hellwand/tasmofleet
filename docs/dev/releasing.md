@@ -46,7 +46,11 @@ Part of the working guide: start at [CLAUDE.md](../../CLAUDE.md).
   name stay valid.
 - **Patch releases (X.Y.Z with Z>0) never add or change a database migration; a schema change
   always means a new minor version.** The tag build enforces it (`make migration-guard`).
-- Tags are signed (`git tag -s vX.Y.Z`) and only set on a green commit of `main`. The tag
+- Tags are signed (`git tag -s vX.Y.Z`) and only set on a green commit of `main`. A pushed `v*` tag cannot be
+  moved or deleted, by anyone (ruleset `tags: release tags cannot be moved or deleted`, no bypass: deletion, update,
+  non-fast-forward; creating a new `v*` tag stays allowed). A wrong tag is fixed with a new version, not by moving it;
+  only in an emergency may a repository admin disable that ruleset for the one repair and set it back to active right
+  after. Tag signing itself is convention. The tag
   run (`release.yml`) checks that the commit is green already (`required` and `main.yml`, see RELEASE tier; no tests are repeated), and the
   image, the GitHub release and the demo site follow only when that passed.
 - **Announce every release** in the one pinned Announcements discussion "TasmoFleet releases" (#315),
