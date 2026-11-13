@@ -91,6 +91,15 @@ type sessionTokens interface {
 // valid session in that browser. Only this one exact route is exempt; with a
 // valid session (header principals included) sign-out keeps its CSRF check.
 // The body is capped like everywhere else.
+//
+// Every other unsafe htmx request without a valid session gets Require's
+// answer for htmx (auth.SignIn: 401 with HX-Redirect to the sign-in page)
+// before guardBodies (#717): its 403 "missing or invalid CSRF token" is swapped
+// into the page by htmx, and a tab left open past the session's end then shows
+// that text where a row or card was. The body is never read. A valid session
+// with a missing or wrong token is still refused with 403, requests that are
+// not htmx keep the 403, and so does a reserved header subject (Require answers
+// it with 403, not with the sign-in page).
 func guardUnsafe(a sessionTokens, cop *http.CrossOriginProtection, csrf func(http.Handler) http.Handler, next http.Handler) http.Handler {
 	guarded := guardBodies(a, csrf(next))
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -101,8 +110,23 @@ func guardUnsafe(a sessionTokens, cop *http.CrossOriginProtection, csrf func(htt
 				return
 			}
 		}
+		if isUnsafe(r) && r.Header.Get("HX-Request") != "" {
+			if _, err := a.Principal(r); errors.Is(err, auth.ErrUnauthenticated) && !errors.Is(err, auth.ErrReservedSubject) {
+				auth.SignIn(w, r, err)
+				return
+			}
+		}
 		guarded.ServeHTTP(w, r)
 	})
+}
+
+// isUnsafe is true for the methods guardBodies checks: all but GET, HEAD and OPTIONS.
+func isUnsafe(r *http.Request) bool {
+	switch r.Method {
+	case http.MethodGet, http.MethodHead, http.MethodOptions:
+		return false
+	}
+	return true
 }
 
 // isPlainLogout is true only for POST to exactly /logout: no query, no encoded

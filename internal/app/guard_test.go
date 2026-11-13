@@ -492,3 +492,78 @@ func TestGuardUnsafeLogoutKeepsTheOriginCheck(t *testing.T) {
 		}
 	}
 }
+
+// untouchedBody fails the test when anything reads it: a request without a
+// session must be answered without its body being parsed or buffered.
+type untouchedBody struct{ t *testing.T }
+
+func (b untouchedBody) Read([]byte) (int, error) {
+	b.t.Error("the body of a request without a session was read")
+	return 0, io.EOF
+}
+
+// Why (#717): a tab left open past the session's end still shows its htmx
+// buttons. An expired session has no CSRF token, so the guard answered the
+// click with a plain 403 "missing or invalid CSRF token", and htmx swapped that
+// text into the page where the row or card had been. Without a session the
+// click must lead to the sign-in page, the way Require answers htmx: 401 with
+// HX-Redirect (back to the page's request, saying when the session expired),
+// and still without reading the body. The CSRF check itself does not soften:
+// a valid session with a missing or wrong token stays refused with 403, a
+// request that is not htmx keeps the plain 403, and so does a header principal
+// with a reserved name (Require answers that one with 403, never sign-in).
+// Only unsafe requests are affected: a GET carries no token and goes on to the
+// route as before (its Require answers htmx itself), and a sign-out without a
+// session keeps the #508 exemption, so the handler still clears the cookie.
+func TestGuardUnsafeSendsHTMXWithoutSessionToSignIn(t *testing.T) {
+	cases := []struct {
+		name     string
+		target   string // "METHOD path"; "" is an htmx action, POST /devices/7/power/1?v=2
+		s        sessionFn
+		htmx     bool
+		body     string // "" sends a body that fails the test when read
+		want     int
+		redirect string // the HX-Redirect header wanted
+	}{
+		{"htmx, no session", "", sessionFn{}, true, "", 401, "/login?next=%2Fdevices%2F7%2Fpower%2F1%3Fv%3D2"},
+		{"htmx, session expired", "", sessionFn{err: auth.ErrSessionExpired}, true, "", 401, "/login?next=%2Fdevices%2F7%2Fpower%2F1%3Fv%3D2&expired=1"},
+		{"htmx, stale pre-session cookie", "", sessionFn{token: "pre-cookie"}, true, "", 401, "/login?next=%2Fdevices%2F7%2Fpower%2F1%3Fv%3D2"},
+		{"htmx, valid session, wrong token", "", sessionFn{token: "tok", valid: true}, true, "csrf=wrong", 403, ""},
+		{"htmx, valid session, no token", "", sessionFn{token: "tok", valid: true}, true, "a=b", 403, ""},
+		{"htmx, reserved header subject", "", sessionFn{err: auth.ErrReservedSubject}, true, "", 403, ""},
+		{"htmx, resolve error other than unauthenticated", "", sessionFn{err: errors.New("database down")}, true, "", 403, ""},
+		{"not htmx, no session", "", sessionFn{}, false, "", 403, ""},
+		{"not htmx, session expired", "", sessionFn{err: auth.ErrSessionExpired}, false, "", 403, ""},
+		{"htmx GET, no session", "GET /devices", sessionFn{}, true, "", 204, ""},
+		{"htmx sign-out, no session", "POST /logout", sessionFn{}, true, "csrf=old", 204, ""},
+	}
+	for _, c := range cases {
+		reached := false
+		next := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { reached = true; w.WriteHeader(http.StatusNoContent) })
+		csrf, err := httpx.NewCSRF(c.s)
+		if err != nil {
+			t.Fatal(err)
+		}
+		method, path, _ := strings.Cut(c.target, " ")
+		if c.target == "" {
+			method, path = http.MethodPost, "/devices/7/power/1?v=2"
+		}
+		var body io.Reader = untouchedBody{t}
+		if c.body != "" {
+			body = strings.NewReader(c.body)
+		}
+		req := httptest.NewRequest(method, path, body)
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		if c.htmx {
+			req.Header.Set("HX-Request", "true")
+		}
+		rec := httptest.NewRecorder()
+		guardUnsafe(c.s, http.NewCrossOriginProtection(), csrf.Middleware, next).ServeHTTP(rec, req)
+		if rec.Code != c.want || reached != (c.want == 204) || rec.Header().Get("HX-Redirect") != c.redirect {
+			t.Errorf("%s: %d HX-Redirect=%q reached=%v, want %d HX-Redirect=%q", c.name, rec.Code, rec.Header().Get("HX-Redirect"), reached, c.want, c.redirect)
+		}
+		if c.want == 403 && strings.TrimSpace(rec.Body.String()) != "missing or invalid CSRF token" {
+			t.Errorf("%s: body %q, want the CSRF refusal", c.name, rec.Body.String())
+		}
+	}
+}

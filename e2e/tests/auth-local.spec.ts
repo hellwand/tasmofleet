@@ -72,6 +72,26 @@ test("Sign out after the session is gone signs out instead of answering 403", { 
   await expect(page.getByLabel("Username")).toBeVisible();
 });
 
+// Why (#717): the same tab still shows the page's htmx buttons. Without a session the click was answered
+// with the plain text "missing or invalid CSRF token", which htmx swapped into the page in place of the
+// part the button belongs to. An htmx action without a session must lead to the sign-in page instead,
+// through htmx's own redirect (401 with HX-Redirect), as a page load does.
+test("an htmx action after the session is gone leads to the sign-in page", { tag: "@core" }, async ({ page }) => {
+  await signInBreakglass(page);
+  await page.goto(app.url + "/settings/system?tab=mqtt");
+  const button = page.getByRole("button", { name: "Test connection" });
+  await expect(button).toBeVisible();
+  await page.context().clearCookies(); // the server-side effect of an expired session: no session cookie matches
+  const answer = page.waitForResponse((r) => r.request().method() === "POST" && r.url().includes("/settings/system/mqtt-test"));
+  await button.click();
+  const res = await answer;
+  expect(res.status(), "the htmx request is answered as Require answers htmx without a session").toBe(401);
+  expect(res.headers()["hx-redirect"], "htmx is told where to go").toMatch(/\/login\?next=/);
+  await expect(page).toHaveURL(/\/login\?next=/);
+  await expect(page.getByLabel("Username")).toBeVisible();
+  await expect(page.getByText("missing or invalid CSRF token")).toHaveCount(0);
+});
+
 // Why (#508): signing out without a session must not let another site sign a person out. Its form post
 // never carries the session cookie (SameSite=Lax), so the server sees no session, but the cookie-clearing
 // answer would still end the valid session in this browser. The origin check refuses it.
