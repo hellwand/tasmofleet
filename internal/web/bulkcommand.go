@@ -141,9 +141,9 @@ func (h *handler) bulkCommandPage(w http.ResponseWriter, r *http.Request) {
 }
 
 // safeInput is the command box's text after a redraw: only a command without a secret comes
-// back into the page (cmdpolicy.Redacted leaves it unchanged).
+// back into the page (cmdpolicy.ShownInFull: the audit log shows it as typed, nothing hidden).
 func safeInput(cmd string) string {
-	if cmdpolicy.Redacted(cmd) != cmd {
+	if !cmdpolicy.ShownInFull(cmd) {
 		return ""
 	}
 	return cmd
