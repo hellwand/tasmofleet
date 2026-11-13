@@ -167,7 +167,7 @@ func TestTonightIsTheNextThreeOClock(t *testing.T) {
 // Why (#604): 03:00 is the maintenance hour, and a clock-change night is the easy place to get it wrong: a
 // day is not always 24 hours. Tonight and Tomorrow night must be 03:00 on the wall clock with the offset
 // that is in force at that time, and a time typed into the hour the clocks skip must still be planned at
-// the instant the Starts row shows, not refused and not moved without saying so.
+// the instant the Starts row shows; without JavaScript, where nothing shows it, it is refused (#792).
 func TestNightPicksOnAClockChangeNightAreThreeOClockLocal(t *testing.T) {
 	berlin, err := time.LoadLocation("Europe/Berlin")
 	if err != nil {
@@ -195,16 +195,50 @@ func TestNightPicksOnAClockChangeNightAreThreeOClockLocal(t *testing.T) {
 		})
 	}
 
-	t.Run("a time in the skipped hour", func(t *testing.T) {
+	// Without JavaScript the person never sees the instant their typed time becomes: a successful submit goes
+	// straight to the transaction page. Go would read 02:30 on this night as 03:30 CEST and plan that, a time
+	// the person did not choose, so the server refuses a time that the clock never shows (#792).
+	t.Run("a time in the skipped hour is refused without JavaScript", func(t *testing.T) {
 		e, o, _, _ := setupOTAAt(t, fixedClock{time.Date(2027, 3, 27, 22, 0, 0, 0, berlin)})
 		form := startForm(url.Values{"when": {"at"}, "at": {"custom"}, "at_date": {"2027-03-28"}, "at_time": {"02:30"}})
-		// The Starts row is drawn from the same state; it must read the instant that is planned.
 		w := parseStart(form, time.Date(2027, 3, 27, 22, 0, 0, 0, berlin))
-		if w.Err != "" || w.StartsText() != "Sun, Mar 28 at 03:30" {
-			t.Fatalf("the Starts row must show the instant that is planned: %q %q", w.Err, w.StartsText())
+		if w.Err != "That time does not exist on this date (clock change)." || !w.Start.IsZero() || w.Mode != startsUnset {
+			t.Fatalf("the skipped hour must be refused, not moved: err %q start %v mode %q", w.Err, w.Start, w.Mode)
 		}
 		resp, body := e.do(t, "POST", "/updates", "operator", form)
-		want := time.Date(2027, 3, 28, 3, 30, 0, 0, berlin) // 01:30 UTC, the instant 02:30 CET would have been
+		if resp.StatusCode != http.StatusUnprocessableEntity || len(o.submitReqs) != 0 {
+			t.Fatalf("%d, submitted %v: %s", resp.StatusCode, o.submitReqs, body)
+		}
+		if text := plain(body); !strings.Contains(text, "That time does not exist on this date (clock change).") || !strings.Contains(body, `value="02:30"`) {
+			t.Errorf("the refusal must say why and keep the typed time: %s", text)
+		}
+	})
+	// A time that exists on that night, and the repeated hour of the autumn change, are planned as typed.
+	t.Run("the hours around a clock change are planned as typed", func(t *testing.T) {
+		for name, c := range map[string]struct {
+			now        time.Time
+			date, hhmm string
+			want       time.Time
+		}{
+			"after the spring change":     {time.Date(2027, 3, 27, 22, 0, 0, 0, berlin), "2027-03-28", "03:30", time.Date(2027, 3, 28, 3, 30, 0, 0, berlin)},
+			"before the spring change":    {time.Date(2027, 3, 27, 22, 0, 0, 0, berlin), "2027-03-28", "01:59", time.Date(2027, 3, 28, 1, 59, 0, 0, berlin)},
+			"a repeated hour in autumn":   {time.Date(2026, 10, 24, 22, 0, 0, 0, berlin), "2026-10-25", "02:30", time.Date(2026, 10, 25, 2, 30, 0, 0, berlin)},
+			"a one-digit hour as typed":   {time.Date(2027, 3, 27, 22, 0, 0, 0, berlin), "2027-03-28", "3:30", time.Date(2027, 3, 28, 3, 30, 0, 0, berlin)},
+			"an ordinary night as before": {time.Date(2027, 3, 20, 22, 0, 0, 0, berlin), "2027-03-21", "02:30", time.Date(2027, 3, 21, 2, 30, 0, 0, berlin)},
+		} {
+			w := parseStart(startForm(url.Values{"when": {"at"}, "at": {"custom"}, "at_date": {c.date}, "at_time": {c.hhmm}}), c.now)
+			if w.Err != "" || !w.Start.Equal(c.want) {
+				t.Errorf("%s: err %q start %v, want %v", name, w.Err, w.Start, c.want)
+			}
+		}
+	})
+	// With JavaScript the browser posts the instant and the Starts row shows it (03:30) before the submit, so it
+	// is planned as shown: the refusal is for the path where the person cannot see what became of the time.
+	t.Run("the instant the browser posts is planned", func(t *testing.T) {
+		e, o, _, _ := setupOTAAt(t, fixedClock{time.Date(2027, 3, 27, 22, 0, 0, 0, berlin)})
+		form := startForm(url.Values{"when": {"at"}, "at": {"custom"}, "start_at": {"2027-03-28T03:30:00+02:00"}, "at_date": {"2027-03-28"}, "at_time": {"02:30"}})
+		resp, body := e.do(t, "POST", "/updates", "operator", form)
+		want := time.Date(2027, 3, 28, 3, 30, 0, 0, berlin)
 		if resp.StatusCode != http.StatusSeeOther || len(o.submitReqs) != 2 || !o.submitReqs[0].StartAt.Equal(want) {
 			t.Fatalf("%d %v want %v: %s", resp.StatusCode, o.submitReqs, want, body)
 		}

@@ -169,7 +169,7 @@ func (h *handler) batchCancelConfirm(w http.ResponseWriter, r *http.Request) {
 		h.renderActionConfirm(w, r, "transactions", actionConfirm{
 			Title:   "Cancel " + txID(p.Batch) + "?",
 			Heading: "Cancel schedule",
-			Text:    planCancelText(txTitle(first, p.Total)+" ("+plural(p.Total, "device")+")", first.StartAt),
+			Text:    planCancelText(txTitle(first, p.Planned)+" ("+plural(p.Planned, "device")+")", first.StartAt),
 			Crumbs:  []confirmLink{{"/transactions", "Transactions"}, {back, txID(p.Batch)}},
 			Last:    "Cancel",
 			Action:  back + "/cancel", Verb: "Cancel schedule",

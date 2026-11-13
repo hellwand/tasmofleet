@@ -22,9 +22,13 @@ import (
 // slot) nor running (nothing happens on the device), and it is not in activeJobStates, which the status bar, the
 // About page and the console read: Dashboard and status bar do not show plans before #707.
 
-// neverRan says that a job ended without ever starting: its start passed while TasmoFleet was down
-// (NotStarted), or a person cancelled the plan before its start. A job cancelled after its start has an
-// UpdatedAt at or after StartAt, because the engine never starts one earlier.
+// neverRan says from the job alone that it ended without ever starting: its start passed while TasmoFleet was
+// down (NotStarted), or a person cancelled the plan before its start (the engine never starts one earlier, so
+// a cancelled job with UpdatedAt before StartAt never ran). It cannot see a plan cancelled after its start
+// time but before the engine queued it (the device was refused and the engine was retrying inside the
+// late-start window): that cancel is only known by its event. Where the events are at hand (jobViews) the
+// decision is jobView.NeverRan; neverRan is the answer for the callers that have only jobs (the dashboard
+// and the status bar, which say nothing of plans).
 func neverRan(j model.Job) bool {
 	if j.NotStarted {
 		return true
@@ -126,14 +130,15 @@ func (h *handler) txnSchedOf(r *http.Request, b batchPage, first model.Job, who,
 		if !j.CancelledAt.IsZero() && (s.CancelledAt.IsZero() || j.CancelledAt.Before(s.CancelledAt)) {
 			s.CancelledAt, s.CancelledBy = j.CancelledAt, h.pr.Text(j.CancelledBy)
 		}
-		if neverRan(j.Job) && !j.Job.NotStarted {
+		if j.NeverRan && !j.Job.NotStarted {
 			cancelled++
 		}
 	}
 	switch {
 	case b.Planned > 0 && b.Running+b.Queued+b.Done == 0:
-		s.Kind, s.In = schedWaiting, startsIn(now, s.Start)
-		s.CancelText = planCancelText(txTitle(first, b.Total)+" ("+plural(b.Total, "device")+")", s.Start)
+		s.Kind, s.In = schedWaiting, planIn(now, s.Start)
+		// The devices that will not start: one cancelled by hand is no longer part of the plan.
+		s.CancelText = planCancelText(txTitle(first, b.Planned)+" ("+plural(b.Planned, "device")+")", s.Start)
 	case b.NotStarted > 0 && b.NotStarted+b.Early == b.Total:
 		s.Kind = schedNotStarted
 		if s.BackAt.IsZero() {
@@ -206,6 +211,19 @@ func scheduledRefusalText(detail string) (string, bool) {
 	return "", false
 }
 
+// dueText is what a plan reads once its start has come and it has not started: the engine retries a start the
+// device refused every 30 seconds until the late-start window is over (schedule.LateStart).
+const dueText = "due, waiting for the device"
+
+// planIn is how far the start of a plan that is still scheduled lies ahead, or that it is due. startsIn
+// stays for the preview, where the start is always ahead.
+func planIn(now, start time.Time) string {
+	if !start.After(now) {
+		return dueText
+	}
+	return startsIn(now, start)
+}
+
 // txSchedRow is one plan in the Scheduled section of Transactions.
 type txSchedRow struct {
 	ID, Title, Devices, By, In, Href, CancelHref, CancelText string
@@ -234,7 +252,7 @@ func (h *handler) scheduledRows(r *http.Request, device model.DeviceID, base str
 		href := base + "/transactions/" + bid(t.ID)
 		title := t.Title
 		rows = append(rows, txSchedRow{ID: txID(t.ID), Title: title, Devices: plural(t.Total, "device"), By: h.pr.Text(t.By),
-			In: startsIn(now, t.StartAt), Href: href, CancelHref: href + "/cancel", Start: t.StartAt,
+			In: planIn(now, t.StartAt), Href: href, CancelHref: href + "/cancel", Start: t.StartAt,
 			CancelText: planCancelText(title, t.StartAt)})
 	}
 	sort.SliceStable(rows, func(a, b int) bool {

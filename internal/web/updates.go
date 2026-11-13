@@ -936,6 +936,7 @@ type jobView struct {
 	Active      bool
 	Base        string
 	CanRetry    bool   // a finished failed or cancelled job: offer "Retry"
+	NeverRan    bool   // ended without ever starting (not started, or its plan was cancelled): "Plan again…", never Retry
 	Step        int    // 0..jobSteps, drives the progress bar
 	StepLabel   string // what the device is doing now
 	Log         []logLine
@@ -996,9 +997,6 @@ func (h *handler) jobViews(r *http.Request, f store.JobFilter) ([]jobView, bool,
 		case j.IsBackup():
 			v.Step, v.StepLabel = backupStep(j.State)
 		}
-		// A job that never ran (its start passed while TasmoFleet was down, or a person cancelled the plan) is not
-		// retried: a retry starts at once, which is not what was planned. "Plan again…" is the way on.
-		v.CanRetry = (j.State == model.JobFailed || j.State == model.JobCancelled) && !neverRan(j)
 		if v.Active && j.CancelRequested {
 			v.StepLabel += ", cancel requested" // a flash cannot be stopped: the job ends after this step
 		}
@@ -1016,6 +1014,12 @@ func (h *handler) jobViews(r *http.Request, f store.JobFilter) ([]jobView, bool,
 				}
 			}
 		}
+		// A job that never ran (its start passed while TasmoFleet was down, or a person cancelled the plan) is not
+		// retried: a retry starts at once, which is not what was planned. "Plan again…" is the way on. The
+		// deciding fact is the cancel out of the scheduled state, whenever it came: after the start time too, while
+		// the engine was still retrying a device that refused (#792). The times are the answer where it is missing.
+		v.NeverRan = neverRan(j) || (j.State == model.JobCancelled && !v.CancelledAt.IsZero())
+		v.CanRetry = (j.State == model.JobFailed || j.State == model.JobCancelled) && !v.NeverRan
 		any = any || v.Active
 		out = append(out, v)
 	}
@@ -1059,7 +1063,7 @@ func (h *handler) batchData(w http.ResponseWriter, r *http.Request) (batchPage, 
 			p.Canceled++
 			if j.Job.NotStarted {
 				p.NotStarted++
-			} else if neverRan(j.Job) {
+			} else if j.NeverRan {
 				p.Early++
 			}
 		case model.JobQueued:
@@ -1399,8 +1403,12 @@ func txOutcome(total, done, running, queued, failed, canceled int) (text, tone s
 
 // groupTransactions folds jobs into one row per transaction, in the order the
 // batches first appear. Shared by the transactions list and the dashboard, so
-// both count and word a transaction the same way.
-func groupTransactions(jobs []model.Job) []txView {
+// both count and word a transaction the same way. A cancelled job counts as one that never ran by what neverRan
+// says of the job; groupTransactionsBy takes the decision from the caller who knows more.
+func groupTransactions(jobs []model.Job) []txView { return groupTransactionsBy(jobs, neverRan) }
+
+// groupTransactionsBy is groupTransactions with the caller's say on which cancelled jobs never ran.
+func groupTransactionsBy(jobs []model.Job, never func(model.Job) bool) []txView {
 	var order []model.BatchID
 	by := map[model.BatchID]*txView{}
 	for _, j := range jobs {
@@ -1426,7 +1434,7 @@ func groupTransactions(jobs []model.Job) []txView {
 			t.Canceled++
 			if j.NotStarted {
 				t.NotStarted++
-			} else if neverRan(j) {
+			} else if never(j) {
 				t.Early++
 			}
 		case model.JobQueued:
@@ -1507,7 +1515,12 @@ func (h *handler) transactionsPage(w http.ResponseWriter, r *http.Request) {
 		raw[i] = j.Job
 	}
 	now := h.d.Clock.Now()
-	items := groupTransactions(raw)
+	// A plan cancelled after its start time never ran either; only the events of the jobs say so (#792).
+	never := map[model.JobID]bool{}
+	for _, j := range jobs {
+		never[j.Job.ID] = j.NeverRan
+	}
+	items := groupTransactionsBy(raw, func(j model.Job) bool { return never[j.ID] })
 	sort.SliceStable(items, func(a, b int) bool { return items[a].ID > items[b].ID }) // newest first
 	// The plans that still wait for their start have their own section above the history (#604).
 	sched, shown, err := h.scheduledRows(r, filter.DeviceID, p.Base, now, items)
@@ -1778,7 +1791,7 @@ func (h *handler) batchRetry(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	for _, j := range jobs {
-		if picked := h.formIDs(r); neverRan(j.Job) && (len(picked) == 0 || slices.Contains(picked, j.Job.DeviceID)) {
+		if picked := h.formIDs(r); j.NeverRan && (len(picked) == 0 || slices.Contains(picked, j.Job.DeviceID)) {
 			// A retry starts at once, which is not what was planned: the person plans it again.
 			h.message(w, r, http.StatusConflict, h.view(r, "Retry not started", "transactions",
 				"Nothing was started. "+j.Device+" never started, and a retry would start it at once. Use \"Plan again…\" on the transaction to choose a new time."))

@@ -432,3 +432,105 @@ func TestDeletingADeviceWithAPlannedUpdateIsRefusedBeforeAnyBackupGoes(t *testin
 		t.Fatal("the refused delete removed the device")
 	}
 }
+
+// Why (#792): the engine retries a start the device refused every 30 seconds for up to 60 minutes, so a plan
+// can be past its start and still scheduled for a long time. "in 1 min" for that whole time tells the person
+// the start is about to come when it is already late; the start is due and waits for the device.
+func TestAPlanPastItsStartSaysItIsDueNotInOneMinute(t *testing.T) {
+	e, _, jobs, _ := setupOTAAt(t, fixedClock{sat.Add(40 * time.Minute)}) // 03:40, the start was 03:00
+	jobs.jobs = []model.Job{schedJob(20, 10, 1, model.JobScheduled, sat), schedJob(21, 10, 2, model.JobScheduled, sat)}
+	for _, path := range []string{"/transactions", "/transactions/10"} {
+		_, body := e.do(t, "GET", path, "operator", nil)
+		text := plain(body)
+		if !strings.Contains(text, "due, waiting for the device") {
+			t.Errorf("%s: a plan past its start does not say it is due: %s", path, text)
+		}
+		if strings.Contains(text, "in 1 min") || strings.Contains(text, " in 0 ") {
+			t.Errorf("%s: a plan 40 minutes past its start still counts down: %s", path, text)
+		}
+	}
+}
+
+// Why (#792): a plan whose start is still ahead keeps its countdown; the due wording is only for a start
+// that has come.
+func TestAPlanBeforeItsStartKeepsItsCountdown(t *testing.T) {
+	e, _, jobs, _ := setupOTAAt(t, fixedClock{sat.Add(-5 * time.Minute)})
+	jobs.jobs = []model.Job{schedJob(20, 10, 1, model.JobScheduled, sat)}
+	_, body := e.do(t, "GET", "/transactions", "operator", nil)
+	if text := plain(body); !strings.Contains(text, "in 5 min") || strings.Contains(text, "due, waiting") {
+		t.Errorf("a plan 5 minutes ahead reads: %s", text)
+	}
+}
+
+// Why (#792): a plan that a person cancelled after its start time, before the engine queued it (the device
+// was refused at the start and the engine was retrying), never ran. Judged by its UpdatedAt it looked like
+// an ordinary cancellation: Retry was offered and would have started the update at once, which is what the
+// plan was never allowed to do. What decides is the fact that the cancel came out of the scheduled state.
+func TestAPlanCancelledAfterItsStartTimeNeverRanAndOffersNoRetry(t *testing.T) {
+	e, o, jobs, _ := setupOTAAt(t, fixedClock{fri.Add(24 * time.Hour)})
+	at := sat.Add(10 * time.Minute)
+	jobs.jobs = nil
+	jobs.events = map[model.JobID][]model.JobEvent{}
+	for _, id := range []model.JobID{60, 61} {
+		j := schedJob(id, 7, model.DeviceID(id-59), model.JobCancelled, sat)
+		j.CreatedBy, j.UpdatedAt = "olga", at
+		jobs.jobs = append(jobs.jobs, j)
+		jobs.events[id] = []model.JobEvent{eventOf(id, at, model.JobScheduled, model.JobCancelled, "cancel", "cancelled by olga")}
+	}
+	_, body := e.do(t, "GET", "/transactions/7", "operator", nil)
+	text := plain(body)
+	if class, word := txnState(t, body); word != "Cancelled before start" || !strings.Contains(class, "t-neutral") {
+		t.Errorf("badge %q (%s), want Cancelled before start in the neutral tone", word, class)
+	}
+	if !strings.Contains(text, "Plan again…") || strings.Contains(body, "Retry failed") || strings.Contains(body, "/transactions/7/retry") {
+		t.Errorf("a plan cancelled after its start time offers a retry or no Plan again: %s", text)
+	}
+	if strings.Contains(body, `/jobs/60/retry`) || strings.Contains(body, `/jobs/61/retry`) {
+		t.Errorf("a device that never ran offers its own Retry: %s", text)
+	}
+	_, list := e.do(t, "GET", "/transactions", "operator", nil)
+	if r := between(list, `<span class="upd-hid">TX-0007</span>`, `</a>`); !strings.Contains(plain(r), "was due") || strings.Contains(plain(r), "· scheduled") {
+		t.Errorf("History reads the cancelled plan as one that ran: %s", plain(r))
+	}
+	resp, rbody := e.do(t, "POST", "/transactions/7/retry", "admin", url.Values{})
+	if resp.StatusCode != http.StatusConflict || len(o.retryCalls) != 0 || !strings.Contains(plain(rbody), "Plan again") {
+		t.Errorf("retry of a plan cancelled late: %d, calls %v: %s", resp.StatusCode, o.retryCalls, plain(rbody))
+	}
+}
+
+// Why (#792): a job cancelled while it ran is an ordinary cancellation and keeps its Retry; only the cancel
+// that came out of the scheduled state marks a job that never ran (a cancel after the start time must not
+// be mistaken for one by its time alone).
+func TestAJobCancelledWhileRunningStillOffersRetry(t *testing.T) {
+	e, _, jobs, _ := setupOTAAt(t, fixedClock{fri.Add(24 * time.Hour)})
+	at := sat.Add(10 * time.Minute)
+	j := schedJob(62, 7, 1, model.JobCancelled, sat)
+	j.UpdatedAt = at
+	jobs.jobs = []model.Job{j}
+	jobs.events = map[model.JobID][]model.JobEvent{62: {
+		eventOf(62, sat.Add(time.Second), model.JobScheduled, model.JobQueued, "start_due", "x"),
+		eventOf(62, at, model.JobApplying, model.JobCancelled, "cancel", "cancelled by olga"),
+	}}
+	_, body := e.do(t, "GET", "/transactions/7", "operator", nil)
+	if !strings.Contains(body, "/transactions/7/retry") {
+		t.Errorf("a job that ran and was cancelled lost its Retry: %s", plain(body))
+	}
+}
+
+// Why (#792): after one device of a plan was cancelled, the dialog of Cancel (and the page without JavaScript)
+// names the devices that will not start. The first count was the plan's original size: "3 devices" for a plan of
+// which two are left made the person think the cancelled one was still part of it.
+func TestCancelOfAHalfCancelledPlanNamesTheDevicesStillPlanned(t *testing.T) {
+	e, _, jobs, _ := setupOTAAt(t, fixedClock{fri})
+	jobs.jobs = []model.Job{schedJob(70, 10, 1, model.JobScheduled, sat), schedJob(71, 10, 2, model.JobScheduled, sat), schedJob(72, 10, 3, model.JobCancelled, sat)}
+	jobs.jobs[2].UpdatedAt = fri.Add(time.Hour) // cancelled by hand before the start
+	_, body := e.do(t, "GET", "/transactions/10", "operator", nil)
+	dlg := tagOf(t, body, `data-dlg-title="Cancel TX-0010?"`)
+	if !strings.Contains(dlg, "(2 devices)") || strings.Contains(dlg, "3 devices") {
+		t.Errorf("the dialog of Cancel names the wrong count: %s", dlg)
+	}
+	_, page := e.do(t, "GET", "/transactions/10/cancel", "operator", nil)
+	if text := plain(page); !strings.Contains(text, "(2 devices)") || strings.Contains(text, "3 devices") {
+		t.Errorf("the page of Cancel without JavaScript names the wrong count: %s", text)
+	}
+}

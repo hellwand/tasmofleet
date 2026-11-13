@@ -108,7 +108,15 @@ func parseStart(form url.Values, now time.Time) whenState {
 		t, err = time.Parse(time.RFC3339, raw)
 	case w.Picked == pickCustom:
 		if w.Date != "" && w.Time != "" {
-			t, err = time.ParseInLocation("2006-01-02 15:04", w.Date+" "+w.Time, now.Location())
+			const layout = "2006-01-02 15:04"
+			t, err = time.ParseInLocation(layout, w.Date+" "+w.Time, now.Location())
+			// Go moves a time that the clocks skip (02:30 on the night they go forward) to the hour after it. With
+			// JavaScript the Starts row shows that moved time before the submit; here the person is sent straight to the
+			// transaction page and would never see it, so a time the clock never shows is refused (#792).
+			if wall, werr := time.Parse(layout, w.Date+" "+w.Time); err == nil && werr == nil && t.Format(layout) != wall.Format(layout) {
+				w.Err = "That time does not exist on this date (clock change)."
+				return w
+			}
 		}
 	case w.Picked != "":
 		t, err = time.Parse(time.RFC3339, w.Picked)
