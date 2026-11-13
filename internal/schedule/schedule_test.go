@@ -217,6 +217,44 @@ func TestPlan(t *testing.T) {
 	}
 }
 
+// Why (#603): an update scheduled for a night must never run hours later in the day, when people use the
+// devices; it may start late only within LateStart (TasmoFleet was down at the start time), the same window
+// as scheduled backups and snapshots, and is Missed after that. A zero start means "at once", so an
+// unscheduled job is never Missed. The boundary is the one of Plan: 60:00 late still runs, 60:01 does not.
+func TestAtLateStartWindow(t *testing.T) {
+	if LateStart != 60*time.Minute {
+		t.Fatalf("LateStart = %v; the window is fixed at 60 minutes, as for backups and snapshots", LateStart)
+	}
+	start := time.Date(2026, 11, 14, 3, 0, 0, 0, berlin(t))
+	for _, c := range []struct {
+		name  string
+		start time.Time
+		now   time.Time
+		want  Action
+	}{
+		{"a second before the start: wait", start, start.Add(-time.Second), Wait},
+		{"a day before the start: wait", start, start.Add(-24 * time.Hour), Wait},
+		{"exactly at the start", start, start, Run},
+		{"late within the window", start, start.Add(30 * time.Minute), Run},
+		{"60:00 late still starts", start, start.Add(LateStart), Run},
+		{"60:01 late is missed", start, start.Add(LateStart + time.Second), Missed},
+		{"days late is missed", start, start.Add(72 * time.Hour), Missed},
+		{"no start time: at once", time.Time{}, start, Run},
+	} {
+		if got := At(c.start, c.now, LateStart); got != c.want {
+			t.Errorf("%s: %v, want %v", c.name, got, c.want)
+		}
+	}
+	// The same boundary as Plan for a schedule slot at the same time.
+	daily := mustNew(t, "mon,tue,wed,thu,fri,sat,sun", "03:00")
+	for _, late := range []time.Duration{LateStart, LateStart + time.Second} {
+		now := start.Add(late)
+		if got, plan := At(start, now, LateStart), Plan(daily, now, start.Add(-time.Hour), LateStart).Action; got != plan {
+			t.Errorf("%v late: At says %v, Plan says %v", late, got, plan)
+		}
+	}
+}
+
 // Why: the Backups page calls a backup "old" after twice the longest wait between runs; a weekly
 // schedule must not make every backup look old after a day, nor a Friday-to-Monday weekend gap count as one day.
 func TestLongestGap(t *testing.T) {

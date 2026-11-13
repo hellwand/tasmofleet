@@ -993,6 +993,26 @@ func TestSubmitRefuses(t *testing.T) {
 
 func withExcluded(d model.Device) model.Device { d.OTAExcluded = true; return d }
 
+// Why (#603): until the engine can wait for a start time, a request with one must be refused as a whole,
+// before anything is read or sent. Accepting it would store a job that starts at once (in the day) instead
+// of at the time the person chose, or one that never starts.
+func TestSubmitRefusesAStartTimeUntilScheduledStartsExist(t *testing.T) {
+	h := newHarness(t, 2, plugDevice(), plugDevice())
+	_, err := h.e.Submit(context.Background(), "alice", []Request{
+		{DeviceID: 1, Release: "16.0.0"},
+		{DeviceID: 2, Release: "16.0.0", StartAt: t0.Add(time.Hour)},
+	})
+	if !errors.Is(err, ErrStartAtUnsupported) {
+		t.Fatalf("err = %v, want ErrStartAtUnsupported", err)
+	}
+	if h.st.batches != 0 {
+		t.Fatal("a batch was created for a request with a start time")
+	}
+	if log := h.rec.entries(); len(log) != 0 {
+		t.Fatalf("the refused request reached the devices or the store: %v", log)
+	}
+}
+
 // A variant is persisted only with explicit consent; otherwise the job keeps
 // the detected variant.
 func TestSubmitPersistsJobFields(t *testing.T) {

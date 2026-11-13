@@ -26,6 +26,8 @@ type JobState string
 
 // OTA job states. Terminal states: Succeeded, Failed, Cancelled.
 const (
+	// JobScheduled: the job waits for its StartAt; it holds no worker and no slot until then (#603).
+	JobScheduled     JobState = "scheduled"
 	JobQueued        JobState = "queued"         // waiting for a free slot
 	JobPreflight     JobState = "preflight"      // identity detection, guard, plan
 	JobBackup        JobState = "backup"         // pre-OTA config backup (skippable per batch)
@@ -237,6 +239,13 @@ type Job struct {
 	// in the final stage once (Tasmota's own ota_loader continuation); the
 	// second time it counts as "still old".
 	AutoContinueSeen bool
+
+	// StartAt is when a scheduled job may start (#603): zero starts at once. Fixed at creation and never
+	// copied by a retry, which starts at once.
+	StartAt time.Time
+	// NotStarted: the job ended cancelled without starting, because its StartAt had passed by more than
+	// schedule.LateStart when TasmoFleet looked at it (it was not running then). Nothing was sent to the device.
+	NotStarted bool
 
 	DeadlineAt time.Time // when the current state times out
 	LastError  string

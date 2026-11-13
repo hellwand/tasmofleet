@@ -922,7 +922,7 @@ func TestStepResume(t *testing.T) {
 
 var (
 	allStates = []model.JobState{
-		model.JobQueued, model.JobPreflight, model.JobBackup, model.JobSetOtaURL, model.JobUpgradeIssued,
+		model.JobScheduled, model.JobQueued, model.JobPreflight, model.JobBackup, model.JobSetOtaURL, model.JobUpgradeIssued,
 		model.JobAwaitReboot, model.JobVerify, model.JobRestoreOtaURL,
 		model.JobSucceeded, model.JobFailed, model.JobCancelled,
 	}
@@ -992,6 +992,20 @@ func TestStepUnknownPairsLeaveJobUnchanged(t *testing.T) {
 	in := job(model.JobRestoreOtaURL, model.StageFinal)
 	if got, as := Step(in, Event{Kind: EvCancel}, t0, testCfg()); !reflect.DeepEqual(got, in) || len(as) != 0 {
 		t.Error("restore_ota_url/cancel changed the job")
+	}
+}
+
+// A scheduled job waits for its start time and must not touch its device before it (#603). Until it
+// gets transitions of its own (package 2 of #603), no event moves it: resume after a restart of
+// TasmoFleet must not probe or send anything. The unknown-pairs test above skips these two events.
+func TestStepScheduledJobIgnoresResumeAndCancel(t *testing.T) {
+	for _, k := range []EventKind{EvResume, EvCancel} {
+		in := job(model.JobScheduled, model.StageFinal)
+		in.StartAt = t0.Add(time.Hour)
+		got, as := Step(in, fullEvent(k), t0, testCfg())
+		if !reflect.DeepEqual(got, in) || len(as) != 0 {
+			t.Errorf("scheduled/%s changed the job to %s or produced actions %v", k, got.State, kinds(as))
+		}
 	}
 }
 

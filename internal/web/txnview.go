@@ -93,6 +93,8 @@ func jobBadge(j model.Job) (string, ui.Tone) {
 		return "Cancelling", ui.ToneNeutral // a flash cannot be stopped: the job ends after this step
 	}
 	switch j.State {
+	case model.JobScheduled:
+		return "Scheduled", ui.ToneNeutral // waits for its start time (#603), not queued for a slot
 	case model.JobQueued:
 		return "Queued", ui.ToneNeutral
 	case model.JobPreflight:
@@ -120,6 +122,9 @@ func jobBadge(j model.Job) (string, ui.Tone) {
 	case model.JobFailed:
 		return "Failed", ui.ToneDanger
 	case model.JobCancelled:
+		if j.NotStarted {
+			return "Not started", ui.ToneWarn // its start time passed while TasmoFleet was down (#603)
+		}
 		return "Cancelled", ui.ToneNeutral
 	}
 	return label(string(j.State)), ui.ToneNeutral

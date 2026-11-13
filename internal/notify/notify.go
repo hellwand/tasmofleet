@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/hellwand/tasmofleet/internal/config"
+	"github.com/hellwand/tasmofleet/internal/schedule"
 )
 
 // Channel is a way to deliver an event.
@@ -202,7 +203,7 @@ func BackupMissed(c config.Config, slot, at time.Time) Event {
 }
 
 // MissedGrace is how late a scheduled backup still starts; the text of BackupMissed names it.
-const MissedGrace = 60 * time.Minute
+const MissedGrace = schedule.LateStart
 
 // SnapshotMissed is the event of a scheduled database snapshot that did not happen: TasmoFleet was
 // not running at its time and was back too late to take it. It is the snapshot failure event, so

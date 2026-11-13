@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/hellwand/tasmofleet/internal/model"
+	"github.com/hellwand/tasmofleet/internal/web/ui"
 )
 
 // Why: the UI must never show raw enum names such as "auth_failed" (a
@@ -71,6 +72,29 @@ func TestJobStepNeverGoesBackwards(t *testing.T) {
 	}
 	if prev != jobSteps {
 		t.Fatalf("done is step %d, want %d", prev, jobSteps)
+	}
+}
+
+// Why (#603, #604): a job that waits for its start time has not started; reading "Queued" or
+// "Waiting for a free slot" would say it is about to run now, and any progress would say it touched the
+// device. A job whose start passed while TasmoFleet was down was not cancelled by anyone and nothing was
+// attempted: it reads "Not started" in the warn tone, not "Cancelled" and not "Failed".
+func TestScheduledAndNotStartedJobsReadAsSuch(t *testing.T) {
+	if n, text := jobStep(model.JobScheduled, model.StageFinal); n != 0 || text != "Scheduled" {
+		t.Errorf("scheduled job on the progress bar: step %d %q, want 0 \"Scheduled\"", n, text)
+	}
+	for _, c := range []struct {
+		j    model.Job
+		word string
+		tone ui.Tone
+	}{
+		{model.Job{State: model.JobScheduled}, "Scheduled", ui.ToneNeutral},
+		{model.Job{State: model.JobCancelled, NotStarted: true}, "Not started", ui.ToneWarn},
+		{model.Job{State: model.JobCancelled}, "Cancelled", ui.ToneNeutral},
+	} {
+		if w, tn := jobBadge(c.j); w != c.word || tn != c.tone {
+			t.Errorf("%s (not started %v): badge %q %s, want %q %s", c.j.State, c.j.NotStarted, w, tn, c.word, c.tone)
+		}
 	}
 }
 

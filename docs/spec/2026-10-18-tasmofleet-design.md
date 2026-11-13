@@ -985,7 +985,7 @@ failed"; none of them touches firmware, so the Guard and the states below concer
 
 ### 9.2 States
 
-`queued`, `preflight`, `backup`, `set_ota_url`, `safeboot_switch` and `safeboot_recover` (push into
+`scheduled` (waits for its start time, 9.4b), `queued`, `preflight`, `backup`, `set_ota_url`, `safeboot_switch` and `safeboot_recover` (push into
 safeboot only, below), `upgrade_issued`, `await_reboot`, `verify`,
 `restore_ota_url`, terminal `succeeded`, `failed`, `cancelled`. `Stage` is `minimal` or
 `final`; staged jobs pass through `set_ota_url -> ... -> verify` twice.
@@ -1086,6 +1086,7 @@ Resume (process start): non-terminal jobs get `resume`.
 
 | State                             | On resume                                                 |
 | --------------------------------- | --------------------------------------------------------- |
+| scheduled                         | unchanged (9.4b)                                          |
 | queued                            | wait for scheduler                                        |
 | preflight, verify                 | probe_identity                                            |
 | backup                            | backup                                                    |
@@ -1117,6 +1118,31 @@ The path of an update is chosen once, in the preview, which is also the prefligh
 - `stat/<t>/UPGRADE` `Failed ... connection failed` ends the stage without a second `Upgrade 1` (`ErrTextFWUnreachable`); the application records FWReach=no.
 - The job does not store the identity it probes (it is not an HTTP probe), so the device's GroupTopic read stays fresh for the writes of the job.
 - MQTT timings: reply 8 s, connection failure about 66 s after `Upgrade 1`, RebootWindow unchanged. The pre-OTA backup needs the MQTT backup (#257); without it the job fails at the backup unless the backup is switched off.
+
+### 9.4b Scheduled start (#603)
+
+An update job can wait for a start time. Package 1 (0.36.0) is the contract only; nothing creates such a job
+yet. Package 2 gives the state its transitions (start, cancel, missed, notification) and lifts the refusal.
+
+- `model.JobScheduled` (`scheduled`): not terminal; the job waits for `Job.StartAt` and holds no worker and
+  no slot (`OTA_PARALLEL`) until then. Like every non-terminal job it holds its device in
+  `ota_jobs_one_active`. Until package 2 it is outside the transition table: `Step` (resume and cancel
+  included) leaves it unchanged.
+- `Job.StartAt`: when the job may start; zero starts at once (every job made before). Fixed at creation,
+  never rewritten by a transition and never copied by a retry (`retryRequest`), which starts at once.
+- `Job.NotStarted`: the job ended `cancelled` without starting, because its start had passed by more than
+  the late-start window; nothing was sent to the device.
+- Migration 0048 adds `ota_jobs.start_at` (milliseconds, like `deadline_at`; 0 = none) and
+  `ota_jobs.not_started` (0/1), both `NOT NULL DEFAULT 0`, so rows from before read as "at once" and
+  "started". `CreateBatch` and `CreateRetryBatch` store `start_at`; `SaveTransition` writes `not_started`
+  and never `start_at`. `store.JobFilter` has `CreatedBy` (the creator's subject) and `Scheduled`
+  (`start_at <> 0`, whatever the state).
+- `schedule.LateStart` = 60 min, fixed (not a setting; the same window as scheduled backups and snapshots:
+  `notify.MissedGrace` is this constant). `schedule.At(start, now, grace)` is pure: `Wait` before `start`, `Run` while
+  `now - start <= grace` (the boundary of `schedule.Plan`: 60:00 late runs, 60:01 does not), `Missed`
+  after; a zero `start` is `Run`.
+- `ota.Request.StartAt`: until package 2, `Submit` refuses a request with a non-zero `StartAt` as a whole
+  with `ota.ErrStartAtUnsupported`, before it reads a device or creates anything.
 
 ### 9.5 Timeouts and limits (defaults, configurable)
 

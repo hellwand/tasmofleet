@@ -94,6 +94,8 @@ const jobSteps = 8
 func jobStep(state model.JobState, stage model.Stage) (int, string) {
 	minimal := stage == model.StageMinimal
 	switch state {
+	case model.JobScheduled:
+		return 0, "Scheduled" // waits for its start time (#603): no slot, no progress yet
 	case model.JobQueued:
 		return 0, "Waiting for a free slot"
 	case model.JobPreflight:

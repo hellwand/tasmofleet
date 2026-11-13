@@ -233,3 +233,24 @@ func Plan(s Schedule, now, handled time.Time, grace time.Duration) Decision {
 	}
 	return d
 }
+
+// LateStart is how late a timed job still starts when TasmoFleet was not running at its time: the window
+// of scheduled update starts (#603). It is fixed, not a setting, and the same as for scheduled backups
+// and snapshots.
+const LateStart = 60 * time.Minute
+
+// At decides what a job with a single start time does at now: Wait before start, Run from start until
+// grace has passed (a late start after downtime; the boundary is the one of Plan), Missed after that. A
+// zero start is "at once" and runs.
+func At(start, now time.Time, grace time.Duration) Action {
+	switch {
+	case start.IsZero():
+		return Run
+	case now.Before(start):
+		return Wait
+	case now.Sub(start) <= grace:
+		return Run
+	default:
+		return Missed
+	}
+}

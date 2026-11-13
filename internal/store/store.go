@@ -126,10 +126,13 @@ type BatchStore interface {
 
 // JobFilter narrows ListJobs. Zero values mean "any".
 type JobFilter struct {
-	DeviceID model.DeviceID
-	BatchID  model.BatchID
-	States   []model.JobState
-	Limit    int
+	DeviceID  model.DeviceID
+	BatchID   model.BatchID
+	CreatedBy string // jobs created by this subject
+	// Scheduled keeps only jobs that were given a start time (Job.StartAt), whatever their state.
+	Scheduled bool
+	States    []model.JobState
+	Limit     int
 }
 
 // ArtifactStore persists the firmware cache index (files live on disk).

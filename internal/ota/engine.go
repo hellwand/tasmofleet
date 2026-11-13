@@ -11,6 +11,7 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/hellwand/tasmofleet/internal/audit"
 	"github.com/hellwand/tasmofleet/internal/backup"
@@ -113,6 +114,9 @@ var (
 	// commands runs to its end; stopping it halfway would leave the device
 	// with some settings changed and not saved.
 	ErrNotCancellable = errors.New("ota: job cannot be cancelled now")
+	// ErrStartAtUnsupported: a Request carried a start time, which the engine does not run yet (#603,
+	// package 2); nothing is created.
+	ErrStartAtUnsupported = errors.New("ota: a scheduled start is not supported yet")
 )
 
 // Refusal names one device Submit did not accept and why.
@@ -278,6 +282,9 @@ type Request struct {
 	// with tasmofleet's own URL, which a fresh preflight would otherwise
 	// record as the one to restore.
 	OriginalOtaURL string
+	// StartAt is when the job may start (Job.StartAt); zero starts at once. A retry never sets it.
+	// Submit refuses a non-zero StartAt with ErrStartAtUnsupported until scheduled starts run (#603).
+	StartAt time.Time
 }
 
 // PreviewItem is the dry-run result for one device: what would happen.
@@ -583,6 +590,11 @@ func (e *Engine) Submit(ctx context.Context, actor string, reqs []Request) (mode
 func (e *Engine) submit(ctx context.Context, actor string, reqs []Request, retryOf model.BatchID, tolerateSkip bool) (model.BatchID, []Refusal, error) {
 	if len(reqs) == 0 {
 		return 0, nil, errors.New("ota: empty batch")
+	}
+	for _, r := range reqs {
+		if !r.StartAt.IsZero() {
+			return 0, nil, fmt.Errorf("%w (device %d)", ErrStartAtUnsupported, r.DeviceID)
+		}
 	}
 	var ref []Refusal
 	var rest []Request

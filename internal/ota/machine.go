@@ -178,8 +178,9 @@ func Step(j model.Job, ev Event, now time.Time, cfg Config) (model.Job, []Action
 		return stepVerify(j, ev, now, cfg)
 	case model.JobRestoreOtaURL:
 		return stepRestore(j, ev, now, cfg)
-	case model.JobApplying, model.JobSucceeded, model.JobFailed, model.JobCancelled:
-		// not in the transition table: policy jobs never reach the machine
+	case model.JobScheduled, model.JobApplying, model.JobSucceeded, model.JobFailed, model.JobCancelled:
+		// not in the transition table: policy jobs never reach the machine; a scheduled job gets its
+		// transitions with the scheduled start (#603, package 2)
 	}
 	return j, nil
 }
@@ -268,7 +269,7 @@ func resume(j model.Job, now time.Time, cfg Config) (model.Job, []Action) {
 	case model.JobRestoreOtaURL:
 		j.DeadlineAt = now.Add(cfg.CommandTimeout)
 		return j, []Action{{Kind: ActRestoreOtaURL, URL: j.OriginalOtaURL}}
-	case model.JobQueued, model.JobApplying, model.JobSucceeded, model.JobFailed, model.JobCancelled:
+	case model.JobScheduled, model.JobQueued, model.JobApplying, model.JobSucceeded, model.JobFailed, model.JobCancelled:
 		// not in the transition table: the job stays unchanged
 	}
 	return j, nil // queued: the scheduler sends start
@@ -285,7 +286,7 @@ func cancel(j model.Job, now time.Time) (model.Job, []Action) {
 		j.CancelRequested = true
 		j.UpdatedAt = now
 		return j, nil
-	case model.JobRestoreOtaURL, model.JobApplying, model.JobSucceeded, model.JobFailed, model.JobCancelled:
+	case model.JobScheduled, model.JobRestoreOtaURL, model.JobApplying, model.JobSucceeded, model.JobFailed, model.JobCancelled:
 		// not in the transition table: the job stays unchanged
 	}
 	return j, nil

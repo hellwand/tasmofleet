@@ -14,17 +14,17 @@ import (
 
 const jobCols = `id, batch_id, device_id, state, stage, plan, policy, skip_backup, attempt, target_release, target_variant, target_build, target_custom,
 	target_artifact, minimal_artifact, identity_before, original_ota_url, uptime_before, seen_offline, cancel_requested,
-	auto_continue_seen, deadline_at, last_error, created_by, created_at, updated_at, kind, commands, created_kind, delivery, batch_parallel, reply_timeout_ms, via_safeboot, recovery_step, transport, mqtt_upload`
+	auto_continue_seen, deadline_at, last_error, created_by, created_at, updated_at, kind, commands, created_kind, delivery, batch_parallel, reply_timeout_ms, via_safeboot, recovery_step, transport, mqtt_upload, start_at, not_started`
 
 func scanJob(r scanner) (model.Job, error) {
 	var j model.Job
 	var state, stage, plan, policy, ident, kind, delivery string
-	var skip, seen, cancel, autoCont, viaSafeboot, mqttUpload int
+	var skip, seen, cancel, autoCont, viaSafeboot, mqttUpload, notStarted int
 	var transport string
-	var deadline, created, updated, replyMS int64
+	var deadline, created, updated, replyMS, startAt int64
 	err := r.Scan(&j.ID, &j.BatchID, &j.DeviceID, &state, &stage, &plan, &policy, &skip, &j.Attempt, &j.TargetRelease,
 		&j.TargetVariant, &j.TargetBuild, &j.TargetCustom, &j.TargetArtifact, &j.MinimalArtifact, &ident, &j.OriginalOtaURL, &j.UptimeBefore, &seen, &cancel,
-		&autoCont, &deadline, &j.LastError, &j.CreatedBy, &created, &updated, &kind, &j.Commands, &j.CreatedKind, &delivery, &j.BatchParallel, &replyMS, &viaSafeboot, &j.RecoveryStep, &transport, &mqttUpload)
+		&autoCont, &deadline, &j.LastError, &j.CreatedBy, &created, &updated, &kind, &j.Commands, &j.CreatedKind, &delivery, &j.BatchParallel, &replyMS, &viaSafeboot, &j.RecoveryStep, &transport, &mqttUpload, &startAt, &notStarted)
 	if err != nil {
 		return model.Job{}, err
 	}
@@ -41,6 +41,7 @@ func scanJob(r scanner) (model.Job, error) {
 	j.State, j.Stage, j.Plan, j.Policy = model.JobState(state), model.Stage(stage), model.Plan(plan), model.UpdatePolicy(policy)
 	j.SkipBackup, j.SeenOffline, j.CancelRequested = skip != 0, seen != 0, cancel != 0
 	j.DeadlineAt, j.CreatedAt, j.UpdatedAt = fromMS(deadline), fromMS(created), fromMS(updated)
+	j.StartAt, j.NotStarted = fromMS(startAt), notStarted != 0
 	return j, nil
 }
 
@@ -88,12 +89,12 @@ func (s *SQLite) createBatch(ctx context.Context, createdBy string, retryOf mode
 		}
 		res, err := tx.ExecContext(ctx, `INSERT INTO ota_jobs (batch_id, device_id, state, stage, plan, policy, skip_backup, attempt,
 			target_release, target_variant, target_build, target_custom, target_artifact, minimal_artifact, identity_before, original_ota_url, uptime_before,
-			seen_offline, cancel_requested, auto_continue_seen, deadline_at, last_error, created_by, created_at, updated_at, kind, commands, created_kind, delivery, batch_parallel, reply_timeout_ms, via_safeboot, recovery_step, transport, mqtt_upload)
-			VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+			seen_offline, cancel_requested, auto_continue_seen, deadline_at, last_error, created_by, created_at, updated_at, kind, commands, created_kind, delivery, batch_parallel, reply_timeout_ms, via_safeboot, recovery_step, transport, mqtt_upload, start_at)
+			VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 			bid, j.DeviceID, string(j.State), string(j.Stage), string(j.Plan), string(j.Policy), b2i(j.SkipBackup), j.Attempt,
 			j.TargetRelease, j.TargetVariant, j.TargetBuild, j.TargetCustom, j.TargetArtifact, j.MinimalArtifact, string(ident), j.OriginalOtaURL, j.UptimeBefore,
 			b2i(j.SeenOffline), b2i(j.CancelRequested), b2i(j.AutoContinueSeen),
-			toMS(j.DeadlineAt), j.LastError, createdBy, now, now, kindOf(j), j.Commands, j.CreatedKind, string(j.Delivery), j.BatchParallel, j.ReplyTimeout.Milliseconds(), b2i(j.ViaSafeboot), j.RecoveryStep, string(j.Transport), b2i(j.MQTTUpload))
+			toMS(j.DeadlineAt), j.LastError, createdBy, now, now, kindOf(j), j.Commands, j.CreatedKind, string(j.Delivery), j.BatchParallel, j.ReplyTimeout.Milliseconds(), b2i(j.ViaSafeboot), j.RecoveryStep, string(j.Transport), b2i(j.MQTTUpload), toMS(j.StartAt))
 		if err != nil {
 			return 0, nil, fmt.Errorf("device %d: %w", j.DeviceID, mapErr(err))
 		}
@@ -126,6 +127,13 @@ func (s *SQLite) ListJobs(ctx context.Context, f JobFilter) ([]model.Job, error)
 	if f.BatchID != 0 {
 		where = append(where, "batch_id=?")
 		args = append(args, f.BatchID)
+	}
+	if f.CreatedBy != "" {
+		where = append(where, "created_by=?")
+		args = append(args, f.CreatedBy)
+	}
+	if f.Scheduled {
+		where = append(where, "start_at <> 0")
 	}
 	if len(f.States) > 0 {
 		where = append(where, "state IN ("+strings.TrimSuffix(strings.Repeat("?,", len(f.States)), ",")+")")
@@ -169,8 +177,8 @@ func (s *SQLite) queryJobs(ctx context.Context, where []string, order string, li
 
 // SaveTransition writes j and appends ev in one transaction, but only if the
 // stored state equals ev.From; otherwise it returns ErrConflict and changes
-// nothing. Immutable fields (batch, device, creator, creation time) are not
-// updated.
+// nothing. Immutable fields (batch, device, creator, creation time, start
+// time) are not updated.
 func (s *SQLite) SaveTransition(ctx context.Context, j model.Job, ev model.JobEvent) error {
 	if ev.JobID != j.ID {
 		return fmt.Errorf("store: event is for job %d, job is %d", ev.JobID, j.ID)
@@ -187,10 +195,10 @@ func (s *SQLite) SaveTransition(ctx context.Context, j model.Job, ev model.JobEv
 	now := s.now()
 	res, err := tx.ExecContext(ctx, `UPDATE ota_jobs SET state=?, stage=?, plan=?, policy=?, skip_backup=?, attempt=?, target_release=?,
 		target_variant=?, target_artifact=?, minimal_artifact=?, identity_before=?, original_ota_url=?, uptime_before=?, seen_offline=?,
-		cancel_requested=?, auto_continue_seen=?, deadline_at=?, last_error=?, recovery_step=?, transport=?, updated_at=? WHERE id=? AND state=?`,
+		cancel_requested=?, auto_continue_seen=?, deadline_at=?, last_error=?, recovery_step=?, transport=?, not_started=?, updated_at=? WHERE id=? AND state=?`,
 		string(j.State), string(j.Stage), string(j.Plan), string(j.Policy), b2i(j.SkipBackup), j.Attempt, j.TargetRelease,
 		j.TargetVariant, j.TargetArtifact, j.MinimalArtifact, string(ident), j.OriginalOtaURL, j.UptimeBefore, b2i(j.SeenOffline),
-		b2i(j.CancelRequested), b2i(j.AutoContinueSeen), toMS(j.DeadlineAt), j.LastError, j.RecoveryStep, string(j.Transport), toMS(now), j.ID, string(ev.From))
+		b2i(j.CancelRequested), b2i(j.AutoContinueSeen), toMS(j.DeadlineAt), j.LastError, j.RecoveryStep, string(j.Transport), b2i(j.NotStarted), toMS(now), j.ID, string(ev.From))
 	if err != nil {
 		return mapErr(err)
 	}
