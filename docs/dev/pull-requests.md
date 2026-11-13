@@ -48,3 +48,15 @@ local worktree and branch are removed. Before deleting, check containment:
 `git cherry origin/main <branch>` shows only `-` lines, or the branch's diff against
 `main` is empty (rebased or squashed work). Branches with uncontained changes are never
 deleted silently.
+
+**The script:** `tools/wt.sh` (#775) does this, so it is not retyped in every brief. `tools/wt.sh new <topic> [base]` fetches and creates
+`../tasmofleet-<topic>` on a new branch `<topic>` from `origin/main` (or `base`), without upstream; `tools/wt.sh list` shows every worktree with
+branch, head and whether its branch is contained in `origin/main`; `tools/wt.sh done <topic>` removes the worktree and the local branch only when
+the tree is clean (untracked files count) and every commit of the branch has its patch on `origin/main` (`git cherry`, so a rebase or a
+cherry-picked merge train counts although the commit ids differ, where `git branch -d` refuses). Otherwise it lists what is missing and removes
+nothing; if `git cherry` itself fails, containment is unknown and it removes nothing. A merge commit that `origin/main` does not contain counts as
+missing (`git cherry` compares only non-merge commits, so a conflict resolution inside a merge would otherwise go unseen). The branch is deleted only
+at the tip that was checked. Ignored files in the worktree (`data/`, `*.db`, `.env`) are deleted with it.
+Run it from the main clone or any worktree, but not from inside the worktree being removed. It never touches the working tree of the main
+checkout and never deletes a remote branch (that stays with the maintainer's merge). A squash merge whose result is not a patch of the branch is
+not recognised: check it by hand (the diff of the branch against `origin/main` is empty).
