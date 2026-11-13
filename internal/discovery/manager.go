@@ -39,6 +39,12 @@ const (
 	// publisher repeating one message must not turn into a probe stream.
 	minMessageGap = 15 * time.Second
 	maxGapEntries = 8192
+	// maxRefusedEntries bounds the table that remembers which refused configs were logged;
+	// maxRefusedReasons bounds the reasons kept per MAC (badClaim has a handful of fixed texts).
+	maxRefusedEntries = 4096
+	maxRefusedReasons = 8
+	// dropQueueFull is the OnDropped kind of a message the queue had no room for.
+	dropQueueFull = "queue_full"
 )
 
 // Inventory is the part of the inventory the manager uses. UpsertExisting
@@ -87,7 +93,9 @@ type Options struct {
 	ProbeTimeout time.Duration
 	Logger       *slog.Logger
 	// OnDropped, if set, is called when a proposal is not stored because the
-	// per-kind limit is reached (metric tasmofleet_discovery_proposals_dropped_total).
+	// per-kind limit is reached, with its kind, and when an MQTT message finds
+	// the queue full, with dropQueueFull (metric
+	// tasmofleet_discovery_proposals_dropped_total{kind}). It must not block.
 	OnDropped func(kind string)
 	// Asker sends the Status 5 questions of MQTT-first discovery (mqttcmd.Channel): one command at a
 	// time per topic, a gap between publishes on the whole bus, the same refusals as every other
@@ -122,6 +130,10 @@ type Manager struct {
 
 	gapMu sync.Mutex
 	last  map[string]time.Time
+
+	// refMu guards refused: the reasons already logged for the MAC of a refused discovery config.
+	refMu   sync.Mutex
+	refused map[string]map[string]struct{}
 
 	smu      sync.Mutex
 	base     context.Context
@@ -176,7 +188,7 @@ func New(o Options) (*Manager, error) {
 	return &Manager{
 		o: o, clk: o.Clock, log: o.Logger,
 		pending: map[string]mqttbus.Message{}, wake: make(chan struct{}, 1),
-		last: map[string]time.Time{}, scans: map[ScanID]*scan{},
+		last: map[string]time.Time{}, refused: map[string]map[string]struct{}{}, scans: map[ScanID]*scan{},
 		topics: map[string]*topicState{}, reprobed: map[model.DeviceID]time.Time{}, askGrace: askGrace,
 	}, nil
 }
@@ -269,6 +281,9 @@ func (m *Manager) HandleMQTT(msg mqttbus.Message) {
 	old, queued := m.pending[key]
 	if !queued && len(m.pending) >= maxQueuedMessages || m.qbytes-len(old.Payload)+len(msg.Payload) > maxQueuedBytes {
 		m.qmu.Unlock()
+		if m.o.OnDropped != nil { // after the unlock: neither a callback nor a log line under qmu
+			m.o.OnDropped(dropQueueFull)
+		}
 		return
 	}
 	if !queued {
@@ -303,15 +318,23 @@ func (m *Manager) handleMessage(ctx context.Context, msg mqttbus.Message) {
 		m.handleTopic(ctx, msg)
 		return
 	}
+	if len(msg.Payload) == 0 {
+		// An empty payload withdraws the retained config (Tasmota does so when discovery is switched
+		// off). That is no refusal. The log note stays, so withdrawing cannot re-arm the log.
+		m.log.Debug("discovery: config withdrawn", "topic", msg.Topic)
+		return
+	}
 	c, err := parseDiscovery(msg.Topic, msg.Payload)
 	if err != nil {
-		m.log.Debug("discovery: message ignored", "err", err)
+		m.logRefused(msg.Topic, err)
 		return
 	}
 	m.noteDiscoveryTopic(c)
 	if !m.allowMAC(c.mac) {
 		return // a kept claim of the topic stays (a reconnect replays the same config)
 	}
+	// After the rate limit: a working config re-arms the refusal log at most once per minMessageGap.
+	m.forgetRefused(c.mac)
 	m.dropClaim(c.topic)
 	out, err := m.consider(ctx, c)
 	switch {
@@ -321,6 +344,47 @@ func (m *Manager) handleMessage(ctx context.Context, msg mqttbus.Message) {
 		m.log.Info("discovery: announced address outside the device networks", "mac", c.mac, "topic", c.topic, "ip", c.ip.String())
 		m.keepOutsideClaim(c.topic, fmt.Sprintf("its announced address %s is outside the device networks", c.ip), c, m.clk.Now())
 	}
+}
+
+// logRefused makes a refused discovery config visible. topic is the MAC level of the MQTT topic (the
+// bus accepts only 12 hex digits there), which is known even when the payload is unusable. The reason
+// is the text of badClaim, never payload text: the payload is chosen by whoever can publish. A retained
+// config comes back at every reconnect, so a refusal is logged at info once per MAC and reason (every
+// reason is remembered, so alternating payloads cannot repeat a line); the debug line stays for every
+// message. The table is bounded and fails closed, like the gap table: when it is full, a MAC it does
+// not know yet gets only the debug line.
+func (m *Manager) logRefused(topic string, err error) {
+	reason := strings.TrimPrefix(err.Error(), errBadClaim.Error()+": ")
+	mac, merr := inventory.NormaliseMAC(topic)
+	if merr != nil || mac == "" {
+		m.log.Debug("discovery: message ignored", "reason", reason)
+		return
+	}
+	m.log.Debug("discovery: config refused", "mac", mac, "reason", reason)
+	m.refMu.Lock()
+	seen, known := m.refused[mac]
+	_, logged := seen[reason]
+	news := false
+	switch {
+	case logged:
+	case known && len(seen) < maxRefusedReasons:
+		seen[reason] = struct{}{}
+		news = true
+	case !known && len(m.refused) < maxRefusedEntries:
+		m.refused[mac] = map[string]struct{}{reason: {}}
+		news = true
+	}
+	m.refMu.Unlock()
+	if news {
+		m.log.Info("discovery: config refused, the device is not offered", "mac", mac, "reason", reason)
+	}
+}
+
+// forgetRefused clears the note of mac once its config works, so a later breakage is logged again.
+func (m *Manager) forgetRefused(mac string) {
+	m.refMu.Lock()
+	delete(m.refused, mac)
+	m.refMu.Unlock()
 }
 
 // allowMAC enforces minMessageGap per MAC. The table never resets: when it
@@ -446,6 +510,7 @@ func (m *Manager) consider(ctx context.Context, c candidate) (string, error) {
 	case err == nil:
 		return outMoved, nil
 	case errors.Is(err, inventory.ErrConflict):
+		m.log.Debug("discovery: claim dropped, the device changed meanwhile", "mac", c.mac, "via", c.via)
 		return outIgnored, nil // the device changed or vanished meanwhile; the next sighting decides
 	case errors.Is(err, inventory.ErrNeedsVerification):
 		reason := fmt.Sprintf("%q is stored at %s; MAC %s answers at %s and must be confirmed (%s)",
@@ -852,22 +917,38 @@ func MoveRefusal(d model.Device) error {
 
 // Undismiss makes an ignored proposal visible again.
 func (m *Manager) Undismiss(ctx context.Context, actor string, id int64) error {
+	det := m.proposalDetail(ctx, id)
 	err := m.o.Store.UndismissProposal(ctx, id)
 	if errors.Is(err, store.ErrNotFound) {
 		err = ErrNotFound
 	}
-	m.audit(ctx, actor, "discovery.undismiss", fmt.Sprintf("proposal:%d", id), map[string]any{}, err)
+	m.audit(ctx, actor, "discovery.undismiss", fmt.Sprintf("proposal:%d", id), det, err)
 	return err
+}
+
+// proposalDetail is the audit detail that says which device a proposal is about: what Accept
+// records (kind, MAC, address) and the name. The proposal id alone means nothing once the proposal
+// is gone. The lookup serves the record only; when it fails the detail is empty and the action goes on.
+func (m *Manager) proposalDetail(ctx context.Context, id int64) map[string]any {
+	row, err := m.o.Store.GetProposal(ctx, id)
+	if err != nil {
+		if !errors.Is(err, store.ErrNotFound) {
+			m.log.Warn("discovery: audit detail of a proposal unavailable", "id", id, "err", err)
+		}
+		return map[string]any{}
+	}
+	return map[string]any{"kind": row.Kind, "name": row.Device.Name, "mac": row.Device.MAC, "address": row.Device.Address}
 }
 
 // Dismiss hides a proposal. It stays hidden until the device is seen with
 // different data, and is deleted after 30 days without a sighting.
 func (m *Manager) Dismiss(ctx context.Context, actor string, id int64) error {
+	det := m.proposalDetail(ctx, id)
 	err := m.o.Store.DismissProposal(ctx, id)
 	if errors.Is(err, store.ErrNotFound) {
 		err = ErrNotFound
 	}
-	m.audit(ctx, actor, "discovery.dismiss", fmt.Sprintf("proposal:%d", id), map[string]any{}, err)
+	m.audit(ctx, actor, "discovery.dismiss", fmt.Sprintf("proposal:%d", id), det, err)
 	return err
 }
 

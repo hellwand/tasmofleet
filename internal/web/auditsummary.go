@@ -180,7 +180,7 @@ func auditShort(e model.AuditEvent) string { return clip(auditSummary(e), auditS
 func summaryOK(e model.AuditEvent, d map[string]any) (string, bool) {
 	switch e.Action {
 	case "auth.login.local", "auth.logout", "account.password.change", "discovery.scan_cancel",
-		"discovery.dismiss", "discovery.undismiss", "restore.stepup", "import.stepup", "sysconfig.stepup":
+		"restore.stepup", "import.stepup", "sysconfig.stepup":
 		return "", true
 	case "auth.login.oidc":
 		return join(roleText(dStr(d, "role"))), true
@@ -267,8 +267,8 @@ func summaryOK(e model.AuditEvent, d map[string]any) (string, bool) {
 	case "discovery.scan_end":
 		n, _ := dInt(d, "hits")
 		return join(label(dStr(d, "state")), fmt.Sprintf("%d found", n)), true
-	case "discovery.accept":
-		return join(label(dStr(d, "kind")), dStr(d, "address")), true
+	case "discovery.accept", "discovery.dismiss", "discovery.undismiss":
+		return join(label(dStr(d, "kind")), dStr(d, "address")), true // older dismiss rows have an empty detail: ""
 	case "firmware.delete":
 		return join(dStr(d, "release"), dStr(d, "file")), true
 	case "firmware.prune":
@@ -382,6 +382,25 @@ func fallbackSummary(d map[string]any) string {
 		parts = append(parts, k+"="+dStr(d, k))
 	}
 	return strings.Join(parts, " ")
+}
+
+// auditNameMax is the longest device name shown in the target cell.
+const auditNameMax = 30
+
+// auditTargetWithName leads the target text of a "proposal:<id>" target with the device name when the
+// entry records one (ignore and restore do, older rows do not): "Kitchen Lamp (#12)". The cell is
+// narrow and cuts its end, so the name comes first. The name is text a device announced on the
+// network; templ escapes it where the cell is drawn.
+func auditTargetWithName(e model.AuditEvent, text string) string {
+	kind, id, _ := strings.Cut(e.Target, ":")
+	if kind != "proposal" {
+		return text
+	}
+	name := clip(dStr(detailOf(e.Detail), "name"), auditNameMax)
+	if name == "" {
+		return text
+	}
+	return name + " (#" + id + ")"
 }
 
 // auditTargetText is the target as a person reads it. Devices and
