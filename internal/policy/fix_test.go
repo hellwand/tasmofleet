@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"reflect"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -154,10 +155,7 @@ func TestApplyRefusesInvalidLines(t *testing.T) {
 
 // Why: a long plan must not exceed what a Backlog line can carry.
 func TestApplySplitsLongPlans(t *testing.T) {
-	var lines []string
-	for i := 0; i < 20; i++ {
-		lines = append(lines, "SetOption"+string(rune('0'+i%10))+string(rune('0'+i/10))+" 1")
-	}
+	lines := manyLines(20)
 	c := &fakeCmd{}
 	if err := newFixer(c, &fakeRead{vals: map[string]string{"SaveData": "0"}}).Apply(context.Background(), model.Device{}, lines); err != nil {
 		t.Fatal(err)
@@ -182,11 +180,12 @@ func TestApplyStopsOnTheFirstFailedSend(t *testing.T) {
 	}
 }
 
-// manyLines is n plain settings (SetOption00..), enough for several Backlog chunks.
+// manyLines is n plain settings (SetOption0, SetOption10, .., SetOption90, SetOption1, SetOption11, ..), enough for
+// several Backlog chunks; none of them restarts the device.
 func manyLines(n int) []string {
 	lines := make([]string, n)
 	for i := range lines {
-		lines[i] = "SetOption" + string(rune('0'+i%10)) + string(rune('0'+i/10)) + " 1"
+		lines[i] = "SetOption" + strconv.Itoa(i%10*10+i/10) + " 1"
 	}
 	return lines
 }
@@ -227,9 +226,9 @@ func TestApplyWritesEarlierChunksToFlashWhenALaterOneFails(t *testing.T) {
 	}
 	msg := err.Error()
 	for _, want := range []string{
-		"partly sent: 8 of 20 settings were sent and are written to flash, not read back (SetOption00, SetOption10,",
+		"partly sent: 8 of 20 settings were sent and are written to flash, not read back (SetOption0, SetOption10,",
 		"SetOption60, SetOption70)",
-		"the failed step (SetOption80, SetOption90, SetOption01, SetOption11, SetOption21, SetOption31, SetOption41, SetOption51) may or may not have reached the device",
+		"the failed step (SetOption80, SetOption90, SetOption1, SetOption11, SetOption21, SetOption31, SetOption41, SetOption51) may or may not have reached the device",
 		"; not sent: SetOption61, SetOption71, SetOption81, SetOption91: sending SetOption80 1;",
 	} {
 		if !strings.Contains(msg, want) {
@@ -282,7 +281,7 @@ func TestApplyErrorSeparatesSentFailedAndLeftOutLines(t *testing.T) {
 	}
 	msg := err.Error()
 	for _, want := range []string{
-		"partly sent: 8 of 11 settings were sent and are written to flash, not read back (SetOption00,",
+		"partly sent: 8 of 11 settings were sent and are written to flash, not read back (SetOption0,",
 		"; the failed step (PowerOnState) may or may not have reached the device",
 		"; not sent, left out on purpose (reached over MQTT only): Topic, MqttHost: sending PowerOnState 0: refused",
 	} {
