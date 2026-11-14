@@ -480,13 +480,13 @@ The consumer (the router) computes Facts and calls Choose from the same device s
 re-checks the topic at send time (`mqttcmd`), so an edit between the decision and the publish cannot redirect
 a message.
 
-Order (reads MQTT first since #456; everything else HTTP first: the established path with synchronous replies,
+Order (reads MQTT first since #456, writes since #605; transfers and updates HTTP first: the established path,
 while MQTT makes devices HTTP cannot reach manageable, #45). HTTP "not failing" means ok or unknown.
 
 | Action                      | Rule                                                                                                                                                                                                                                                                                           |
 | --------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Commands (reads)            | MQTT when MQTT is usable (on our broker, topic exclusive, FullTopic matches, last will Online; an unknown own GroupTopic is fine), whatever HTTP's state, except that a device whose MQTT read just went unanswered (`ReadsUnansweredSince`, 10 min) is read over HTTP while HTTP is not failing; else HTTP when HTTP is not failing; else None. The router sends a read over HTTP once after MQTT when nothing was published, or when it was published and not answered (timeout) while the caller still waits and HTTP is not failing (that marks the device); never back to MQTT within a call, never a second HTTP request. State, a bare Gpio, Gpios and Modules stay HTTP first (their replies do not match the channel's rules). |
-| Writes                      | HTTP; MQTT when HTTP is failing and MQTT is usable with a known own GroupTopic; else None                                                                                                                                                                                                      |
+| Writes                      | MQTT when MQTT is usable with a known own GroupTopic and no other device's unread (the strict rule), whatever HTTP's state, except that a device whose MQTT read just went unanswered is changed over HTTP while HTTP is not failing; else HTTP when HTTP is not failing; else None. The router keeps four kinds of write on HTTP first while HTTP is not failing (6.6): Make compliant (interim marker until #606), a change that can cut the device off from MQTT (`cmdpolicy.CutOffName`), a write with secret arguments (`cmdpolicy` redacts it; from the console and bulk commands every write the audit does not show in full, `cmdpolicy.ShownInFull`) and a `Template` with a template. A write MQTT did not publish goes over HTTP once; one MQTT published and nobody answered is an unknown outcome, never resent. The power toggle asks the same rule (#605). |
 | Backup                      | HTTP `/dl`; MQTT FileDownload when HTTP is failing and MQTT is usable with a password that is set and not refused; else None                                                                                                                                                                   |
 | Restore                     | HTTP restore upload (`GET /rs` + `POST /u2`) when HTTP is not failing; else MQTT FileUpload Type 2 (usable, password usable); else None (#430: the firmware server plays no part)                                                                                                              |
 | Update, pull                | DownloadHTTP (HTTP not failing, base URL set, FWReach not "no"); else DownloadMQTT (usable, FWReach not "no"); else None                                                                                                                                                                       |
@@ -932,8 +932,32 @@ poll, prober, MAC verifier, discovery scan). The router passes `Uploader` and `B
 HTTP. Rules:
 
 - A call whose Target has no device ID (scan, MAC verifier, address probe) is always HTTP.
-- Unpinned calls go over HTTP while the device's HTTP state is not "failing". A command that
-  `cmdpolicy` classifies as a read follows `Paths.Commands`, any other command `Paths.Writes`.
+- A command that `cmdpolicy` classifies as a read follows `Paths.Commands`, any other command `Paths.Writes`
+  (5.x): both go over MQTT first for a device usable there, writes under the strict rule (#605).
+- **Writes while HTTP is not failing** (#605): over MQTT when `Choose` gives MQTT for writes; else HTTP first
+  (with the failover below). Five kinds stay HTTP first whatever the facts: a console or bulk command
+  (`transport.WithConsole`, set by `devicecmd.Run`) whose arguments the audit does not show in full
+  (`cmdpolicy.ShownInFull`, the allowlist of `cmdpolicy.Redacted`: a secret can hide in any command a person types,
+  inside `If`, in `BLEPair`'s PIN, in `Sendmail`'s login, so this rule fails closed; the console history and bulk's
+  input echo use the same predicate); calls under
+  `transport.WithHTTPFirstWrites` (Make compliant, set in `app/policyfix.go`, interim until #606), a write that
+  `cmdpolicy.CutOffName` names (HTTP's answer confirms it; with HTTP failing the consent rule below applies), a
+  write of TasmoFleet's own whose arguments `cmdpolicy` redacts (`WebPassword`, `Password<n>`, `SSId<n>`, `TmToken`, `Ifx*`,
+  `LoRaWanAppKey`, `RgxPassword`, `RgxSSId`, `WiFiTest`, `MI32Key`, `MI32Keys`, `ZbConfig`, alone or in a `Backlog`, and a command it cannot classify) or whose
+  text carries a credential (`cmdpolicy.CarriesCredential`: any userinfo in a URL such as an `OtaUrl` with
+  `user:pass@`, the login in `Sendmail`'s or `WebSend`'s bracket argument, `password=`): over MQTT they would cross
+  the broker in clear text, which before #605 happened only while HTTP failed; and a `Template` with an argument,
+  alone or in a `Backlog` (it restarts the device and was never tried over MQTT on a real one; the GPIO template
+  job sends it unpinned). A write MQTT provably did not publish (the channel refused
+  it: an executor such as `Json`, `Rule`, `If`, `DevGroupSend`, `LoRaCommand`, a file command, `Backlog2`/`Backlog3`, Status 0; the bus was down; the device offline by its LWT;
+  the snapshot changed) is sent once over HTTP, never back to MQTT within the call. A write MQTT published and the
+  device did not answer (`tasmota.ErrTimeout`) is an unknown outcome: returned as such, never sent again.
+- The power toggle (`devicecmd.Power`) calls the command channel itself, so it confirms the relay's state; it
+  publishes only where `Choose` gives MQTT for writes (`devicecmd.Options.WritesOverMQTT`, injected by the app), else
+  it switches through the router. A switch the channel did not publish goes over HTTP once, pinned
+  (`WithPath(HTTP)`), so the router cannot publish it after all. A switch through the router is traced: its audit
+  `via` names the transport the router used. A device with an unread GroupTopic is switched over HTTP (before
+  #605 it was switched over MQTT whenever it was on our broker).
 - **Failover inside one call** from HTTP to MQTT happens only on `tasmota.NotSent(err)`: a refused
   connection (the dial failed), an address outside DEVICE_NETWORKS, a 401 before execution, or a device
   that refuses the HTTP API (SetOption128; for a _write_ only when the failure memory already held that
@@ -949,7 +973,7 @@ HTTP. Rules:
   right before an MQTT send; a changed topic, group topic, FullTopic or MQTT capability sends nothing.
 - Replies of credential-setting commands are scrubbed on the MQTT path (`cmdpolicy.ScrubReply`).
 - `WithTrace(ctx)` records which transport carried the calls; the audit details of console commands,
-  settings writes and Make compliant carry it as `"via":"http"|"mqtt"` (`"http+mqtt"` when a job used both).
+  power switches, settings writes and Make compliant carry it as `"via":"http"|"mqtt"` (`"http+mqtt"` when a job used both).
 - A write that can cut off a device reached over MQTT only (`cmdpolicy.CutOffName`: Topic, FullTopic, GroupTopic,
   Prefix<n>, Mqtt host/port/user/password/client/fingerprint, `SetOption3 0`, `SetOption103`, `SetOption132`) is
   published over MQTT only when the call carries `transport.WithCutOffConsent`, on the routed path and after a
