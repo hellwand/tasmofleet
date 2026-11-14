@@ -24,14 +24,6 @@ func TestReadGoesOverMQTTFirstEvenWhenHTTPWorks(t *testing.T) {
 	}
 }
 
-func TestWritesKeepTheHTTPFirstOrder(t *testing.T) {
-	// Why: stage 1 changes reads only; a write has no synchronous MQTT reply to rely on yet (stage 2).
-	g := newRig(t)
-	if _, err := g.r.Command(t.Context(), g.target(), "Power1 ON"); err != nil || g.http.n() != 1 || g.mq.n() != 0 {
-		t.Fatalf("err=%v http=%d mqtt=%d", err, g.http.n(), g.mq.n())
-	}
-}
-
 func TestReadUsesHTTPWhenMQTTIsNotUsable(t *testing.T) {
 	// Why: a device off our broker, offline on MQTT or without a topic is read the way it always was.
 	for _, tc := range []struct {
@@ -90,6 +82,41 @@ func TestReadFailsOverToHTTPOnceWhenMQTTGaveNoAnswer(t *testing.T) {
 				t.Errorf("via = %s: both transports carried the read", tr.Via())
 			}
 		})
+	}
+}
+
+func TestATraceListsOnlyTheTransportsThatAnswered(t *testing.T) {
+	// Why (#810): the identity check after a read vouches for the transports the read's values came from. A read
+	// MQTT published and nobody answered brought no value over MQTT (the read went on over HTTP), so asking the
+	// check there too would wait out a second timeout and refuse a read the stored device answered at its address.
+	// Via keeps counting that call: for the audit a write left unanswered may have run.
+	for _, tc := range []struct {
+		name     string
+		err      error
+		via      string
+		answered []Path
+	}{
+		{"answered over MQTT", nil, "mqtt", []Path{MQTT}},
+		{"published, no answer", fmt.Errorf("mqtt: no answer to Status 2: %w", tasmota.ErrTimeout), "http+mqtt", []Path{HTTP}},
+		{"could not publish", fmt.Errorf("%w: Status 2 not sent", tasmota.ErrUnreachable), "http", []Path{HTTP}},
+		{"published, reply unusable", fmt.Errorf("%w: reply", tasmota.ErrBadResponse), "mqtt", []Path{MQTT}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			g := newRig(t)
+			g.mq.err = tc.err
+			ctx, tr := WithTrace(t.Context())
+			_, _ = g.r.Command(ctx, g.target(), "Status 2") // the outcome is not the point: the trace is
+			if tr.Via() != tc.via || fmt.Sprint(tr.Answered()) != fmt.Sprint(tc.answered) {
+				t.Errorf("via=%s answered=%v, want via=%s answered=%v", tr.Via(), tr.Answered(), tc.via, tc.answered)
+			}
+		})
+	}
+	empty, none := &Trace{}, (*Trace)(nil)
+	if a := empty.Answered(); len(a) != 0 {
+		t.Errorf("a trace that recorded nothing answered over %v", a)
+	}
+	if a := none.Answered(); len(a) != 0 { // like Via, safe on no trace at all
+		t.Errorf("no trace answered over %v", a)
 	}
 }
 
@@ -215,12 +242,17 @@ func TestJobCommandsAreNeverMQTTFirst(t *testing.T) {
 }
 
 func TestStatus0IsNeverPublishedByTheRouter(t *testing.T) {
-	// Why (CLAUDE.md safety rule 2): Status 0 is not a read (cmdpolicy asks a person to confirm it), so
-	// it never takes the MQTT-first path; a Status 0 a person confirmed in the console goes as a write
-	// over HTTP, and nothing is published.
-	g := newRig(t)
-	if _, err := g.r.Command(WithConsole(t.Context()), g.target(), "Status 0"); err != nil || g.mq.n() != 0 || g.http.n() != 1 {
-		t.Fatalf("err=%v mqtt=%d http=%d", err, g.mq.n(), g.http.n())
+	// Why (CLAUDE.md safety rule 2): Status 0 is not a read (cmdpolicy asks a person to confirm it). Since #605
+	// writes go over MQTT first, so a Status 0 a person confirmed in the console reaches the real command
+	// channel, which refuses it (T1) before anything is published; it then goes once over HTTP, as before.
+	g := newSimRig(t)
+	before := len(g.dev.Commands())
+	ctx, tr := WithTrace(WithConsole(t.Context()))
+	if _, err := g.r.Command(ctx, g.target(), "Status 0"); err != nil || tr.Via() != "http" {
+		t.Fatalf("err=%v via=%s, want one send over HTTP and nothing published", err, tr.Via())
+	}
+	if got := g.dev.Commands()[before:]; len(got) != 1 {
+		t.Fatalf("the device received %v, want the one Status 0 over HTTP", got)
 	}
 }
 

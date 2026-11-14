@@ -94,10 +94,11 @@ type Options struct {
 	Log    *slog.Logger
 }
 
-// Router implements tasmota.Client over two transports (D1). HTTP stays first; MQTT carries a call
-// when HTTP is known to fail (Choose) or when the HTTP request provably never left (D4). Calls
-// without a device (Target ID 0: scans, MAC verifiers) and passes of Uploader and BootSwitcher go
-// to HTTP untouched.
+// Router implements tasmota.Client over two transports (D1). Reads (#456) and writes (#605) of a device
+// usable on our broker go over MQTT first; everything else, and those when MQTT cannot carry them, over
+// HTTP, with MQTT carrying a call when HTTP is known to fail (Choose) or when the HTTP request provably
+// never left (D4). Calls without a device (Target ID 0: scans, MAC verifiers) and passes of Uploader and
+// BootSwitcher go to HTTP untouched.
 type Router struct {
 	o    Options
 	http tasmota.Client // the raw client, recording what HTTP tells about the device
@@ -166,6 +167,7 @@ const (
 	keyTrace
 	keyLoose
 	keyConsent
+	keyHTTPFirstWrites
 )
 
 // WithPath pins the transport of every call made with ctx (D5): a job that chose its path (OTA,
@@ -183,9 +185,12 @@ func PathFrom(ctx context.Context) (Path, bool) {
 	return p, ok
 }
 
-// WithConsole marks calls typed by a person: over MQTT a reply with other keys than the command's
-// name (Template, Gpios) is accepted as the answer (mqttcmd DoLoose).
+// WithConsole marks calls typed by a person (devicecmd.Run: the console and bulk commands): over MQTT a reply
+// with other keys than the command's name (Template, Gpios) is accepted as the answer (mqttcmd DoLoose), and a
+// write the audit does not show in full keeps HTTP first while HTTP works (write, #605).
 func WithConsole(ctx context.Context) context.Context { return context.WithValue(ctx, keyLoose, true) }
+
+func typedByAPerson(ctx context.Context) bool { loose, _ := ctx.Value(keyLoose).(bool); return loose }
 
 // WithCutOffConsent marks calls a person confirmed after being told that the device is reached over MQTT
 // only and that the change can cut TasmoFleet off from it (the console's confirmation). Without it the
@@ -197,12 +202,28 @@ func WithCutOffConsent(ctx context.Context) context.Context {
 // HasCutOffConsent reports whether ctx carries WithCutOffConsent.
 func HasCutOffConsent(ctx context.Context) bool { c, _ := ctx.Value(keyConsent).(bool); return c }
 
-// Trace records which transports carried the calls made under its context, for the audit "via".
+// WithHTTPFirstWrites keeps the writes made with ctx in the order before #605: over HTTP unless HTTP is known
+// to fail. Make compliant carries it (app/policyfix.go) until it moves to MQTT first in its own change (#606).
+// Reads are not affected.
+func WithHTTPFirstWrites(ctx context.Context) context.Context {
+	return context.WithValue(ctx, keyHTTPFirstWrites, true)
+}
+
+func httpFirstWrites(ctx context.Context) bool {
+	m, _ := ctx.Value(keyHTTPFirstWrites).(bool)
+	return m
+}
+
+// Trace records which transports carried the calls made under its context, for the audit "via", and which of
+// them returned a reply (Answered, for the identity check that vouches for those replies, #810).
 type Trace struct {
 	parent     *Trace // a trace opened inside another one reports to it too
 	mu         sync.Mutex
 	http, mqtt bool
 	refused    bool // a call was stopped before anything was sent
+	// answered: a command over that transport got a reply from a device (a value, or an answer it could not
+	// use); a call that timed out or was given up got none, although it counts for Via.
+	answeredHTTP, answeredMQTT bool
 }
 
 // WithTrace returns a context whose calls are recorded in the returned Trace.
@@ -257,12 +278,62 @@ func noteTrace(ctx context.Context, p Path) {
 	}
 }
 
+// Answered lists the transports over which a command made under the trace got a reply, HTTP before MQTT: the
+// transports the values of a read can have come from. Unlike Via it leaves out a call that was sent and got no
+// answer (a timeout, a caller that gave up): an MQTT read nobody answered brought no value, and the read went on
+// over HTTP. Empty: nothing was answered, or nothing was recorded (no router carried the calls). File transfers
+// are not counted.
+func (t *Trace) Answered() []Path {
+	if t == nil {
+		return nil
+	}
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	var out []Path
+	if t.answeredHTTP {
+		out = append(out, HTTP)
+	}
+	if t.answeredMQTT {
+		out = append(out, MQTT)
+	}
+	return out
+}
+
+func (t *Trace) noteAnswer(mqtt bool) {
+	if t == nil {
+		return
+	}
+	t.parent.noteAnswer(mqtt)
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if mqtt {
+		t.answeredMQTT = true
+	} else {
+		t.answeredHTTP = true
+	}
+}
+
+// noteAnswer records that a command sent over p (HTTP or MQTT) got a reply: anything but a timeout or a caller
+// that gave up (an answer that could not be used is still an answer from whoever is there).
+func noteAnswer(ctx context.Context, p Path, err error) {
+	if err != nil && (errors.Is(err, tasmota.ErrTimeout) || errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded)) {
+		return
+	}
+	if t, _ := ctx.Value(keyTrace).(*Trace); t != nil {
+		t.noteAnswer(p == MQTT)
+	}
+}
+
 // ---- classification
 
 type cmdClass struct {
 	write  bool // changes the device (everything but a read): follows Paths.Writes
 	job    bool // starts a firmware upgrade or a restore
 	redact bool // the reply may echo a credential
+	// credential: the text carries a credential (cmdpolicy.CarriesCredential: userinfo in a URL, a bracket login,
+	// password=) in a command whose name is not secret. It only keeps a write HTTP first; the reply stays as sent,
+	// since the OTA engine checks that the device echoes exactly the OtaUrl it set.
+	credential bool
 }
 
 func classifyCommand(cmnd string) cmdClass {
@@ -270,6 +341,7 @@ func classifyCommand(cmnd string) cmdClass {
 	// Routing takes "changes the device" from ReportsOnly, not from the role class: a bare MqttUser is admin-only
 	// but only reports, and sent as a write it went over HTTP first and failed the Settings read (#702).
 	c := cmdClass{write: err != nil || !cmdpolicy.ReportsOnly(cmnd), redact: v.Redact || err != nil}
+	c.credential = cmdpolicy.CarriesCredential(cmnd)
 	c.job = startsJob(cmnd)
 	return c
 }
@@ -328,7 +400,7 @@ func (r *Router) Command(ctx context.Context, t tasmota.Target, cmnd string) (js
 		return r.read(ctx, t, cmnd, cls)
 	}
 	if r.o.Facts.HTTPState(id).State != HTTPFailing {
-		return r.httpFirst(ctx, t, cmnd, cls)
+		return r.write(ctx, t, cmnd, cls)
 	}
 	// HTTP is known to fail: ask the facts which way works.
 	d, f, p, err := r.decide(ctx, id)
@@ -390,6 +462,74 @@ func (r *Router) read(ctx context.Context, t tasmota.Target, cmnd string, cls cm
 		return r.httpCommand(ctx, t, cmnd)
 	}
 	return raw, err
+}
+
+// write sends a write while HTTP is not known to fail: MQTT first (#605) when Choose says so (the device is
+// usable on our broker under the strict rule and its MQTT reads are not going unanswered), else HTTP first
+// (httpFirst, with its failover when HTTP provably sent nothing). Some writes stay HTTP first whatever the
+// facts: the three of httpFirstWrite, and a write whose arguments may be secret. Over MQTT those would cross the
+// broker in clear text for every client allowed to read cmnd/#; they did so before #605 only while HTTP failed,
+// and that stays so. What counts as secret depends on who wrote the command:
+//   - typed by a person (the console marker, WithConsole: the console and bulk commands through devicecmd.Run):
+//     every command the audit does not show in full (cmdpolicy.ShownInFull, the allowlist of Redacted). A secret
+//     can hide in any command a person types (inside If, a BLE pairing PIN, Sendmail's login), and a list of
+//     secret names missed one in every review round, so this rule fails closed;
+//   - written by TasmoFleet (the settings page, power, Restart, a job): its names come from curated lists and
+//     policy rules, so cls.redact (cmdpolicy's secret names; also a command it cannot classify) and
+//     cls.credential (cmdpolicy.CarriesCredential: userinfo in a URL, a bracket login, password=) decide.
+//
+// A write over MQTT is sent over HTTP once only when MQTT provably published nothing (notPublished: the channel
+// refused the command, the bus was down, the device was offline by its LWT, the snapshot changed), never back to
+// MQTT within the call. A write MQTT published and nobody confirmed (tasmota.ErrTimeout) may have run: it is an
+// unknown outcome, returned as such and never sent again.
+func (r *Router) write(ctx context.Context, t tasmota.Target, cmnd string, cls cmdClass) (json.RawMessage, error) {
+	if cls.redact || cls.credential || httpFirstWrite(ctx, cmnd) || typedByAPerson(ctx) && !cmdpolicy.ShownInFull(cmnd) {
+		return r.httpFirst(ctx, t, cmnd, cls)
+	}
+	id := t.DeviceID()
+	d, err := r.o.Devices.GetDevice(ctx, id)
+	if err != nil || d.MQTT != model.MQTTOurs || d.Topic == "" {
+		return r.httpFirst(ctx, t, cmnd, cls) // not on our broker: no need to gather the inventory's facts
+	}
+	f, err := r.o.Facts.FactsFor(ctx, d)
+	if err != nil {
+		return r.httpFirst(ctx, t, cmnd, cls) // no judgement possible: the established path
+	}
+	// The facts may know of an HTTP failure the cheap check did not see; httpFirst then decides as it always did.
+	if Choose(f).Writes != MQTT || httpFailing(f) {
+		return r.httpFirst(ctx, t, cmnd, cls)
+	}
+	raw, err := r.sendMQTT(ctx, d, cmnd, cls)
+	if err != nil && notPublished(err) {
+		r.o.Log.Info("transport: MQTT did not publish the write, using HTTP", "device", int64(id))
+		return r.httpCommand(ctx, t, cmnd)
+	}
+	return raw, err
+}
+
+// httpFirstWrite reports writes that keep HTTP first while HTTP is not failing (#605):
+//   - Make compliant, by its context marker (WithHTTPFirstWrites), until #606;
+//   - a change that can cut the device off from MQTT (cmdpolicy.CutOffName: topic, broker, login): HTTP's answer
+//     confirms it, and with HTTP failing the consent rule of sendMQTT applies as before;
+//   - a Template with a template (alone or in a Backlog): it restarts the device and was never tried over MQTT
+//     on a real one.
+func httpFirstWrite(ctx context.Context, cmnd string) bool {
+	return httpFirstWrites(ctx) || cmdpolicy.CutOffName(cmnd) != "" || setsTemplate(cmnd)
+}
+
+// setsTemplate reports a Template with an argument, alone or as a part of a Backlog. The bare Template is a read.
+// Judged by the prefix, so "Template{...}" without a blank counts too; no other command starts with it.
+func setsTemplate(cmnd string) bool {
+	for _, part := range strings.Split(cmnd, ";") {
+		part = strings.TrimSpace(part)
+		for len(part) >= len("backlog") && strings.EqualFold(part[:len("backlog")], "backlog") {
+			part = strings.TrimLeft(strings.TrimSpace(part[len("backlog"):]), "0123456789 ")
+		}
+		if len(part) > len("template") && strings.EqualFold(part[:len("template")], "template") && strings.TrimSpace(part[len("template"):]) != "" {
+			return true
+		}
+	}
+	return false
 }
 
 // MQTTCannotMatch reports reads whose replies the command channel does not match (State answers with
@@ -477,6 +617,7 @@ func (r *Router) httpCommand(ctx context.Context, t tasmota.Target, cmnd string)
 		noteTrace(ctx, None)
 	} else {
 		noteTrace(ctx, HTTP)
+		noteAnswer(ctx, HTTP, err)
 	}
 	return raw, err
 }
@@ -525,13 +666,14 @@ func (r *Router) sendMQTT(ctx context.Context, d model.Device, cmnd string, cls 
 		return nil, fmt.Errorf("%w: the device's MQTT settings changed while the command was prepared; nothing was sent", tasmota.ErrUnreachable)
 	}
 	var raw json.RawMessage
-	if loose, _ := ctx.Value(keyLoose).(bool); loose {
+	if typedByAPerson(ctx) {
 		raw, err = m.DoLoose(ctx, d, cmnd)
 	} else {
 		raw, err = m.Do(ctx, d, cmnd)
 	}
 	if err == nil || !notPublished(err) {
-		noteTrace(ctx, MQTT)
+		noteTrace(ctx, MQTT) // also a call nobody answered: for the audit an unanswered write may have run
+		noteAnswer(ctx, MQTT, err)
 	}
 	if err != nil {
 		return nil, err
@@ -546,6 +688,11 @@ func (r *Router) sendMQTT(ctx context.Context, d model.Device, cmnd string, cls 
 func notPublished(err error) bool {
 	return !errors.Is(err, tasmota.ErrTimeout) && (errors.Is(err, tasmota.ErrUnreachable) || errors.Is(err, mqttcmd.ErrRefused))
 }
+
+// NotPublished reports an error of the command channel that proves nothing was published (a refusal, a bus
+// that was down, a device offline by its LWT): the same command may then be sent over HTTP once. A timeout is
+// an unknown outcome and never counts. The power toggle, which calls the channel itself, uses it.
+func NotPublished(err error) bool { return err != nil && notPublished(err) }
 
 // ---- the rest of tasmota.Client
 

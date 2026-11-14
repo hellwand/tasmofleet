@@ -40,7 +40,8 @@ func (p Paths) Reason(a Action) string {
 // I/O (Facts.Now is the clock). The order is fixed (spec §5.x):
 //
 //   - Commands (reads): MQTT when usable (#456), else HTTP unless HTTP is failing.
-//   - Writes: HTTP unless HTTP is failing and MQTT is usable (strict).
+//   - Writes: MQTT when usable under the strict rule (#605), unless MQTT reads went unanswered while
+//     HTTP works; else HTTP unless HTTP is failing.
 //   - Backup: HTTP unless failing; else MQTT FileDownload (usable, password set and not refused).
 //   - Restore: HTTP (the web UI's restore upload) unless HTTP is failing; else MQTT FileUpload Type 2.
 //   - Update, pull: download over HTTP, else download started over MQTT.
@@ -48,9 +49,8 @@ func (p Paths) Reason(a Action) string {
 //     upload over MQTT (only with the experimental checkbox, a fitting image and a usable
 //     password), else the download over MQTT.
 //
-// Writes, transfers and updates keep HTTP first: it is the established path with synchronous
-// replies, and MQTT is what makes devices HTTP cannot reach manageable (#45). Reads go MQTT
-// first since #456.
+// Transfers and updates keep HTTP first: it is the established path, and MQTT is what makes devices
+// HTTP cannot reach manageable (#45). Reads go MQTT first since #456, writes since #605.
 func Choose(f Facts) Paths {
 	var p Paths
 	var t string
@@ -205,14 +205,28 @@ func chooseCommands(f Facts) (Path, string) {
 	return None, noPath(httpFailText(f.HTTP), "MQTT is not usable: "+why)
 }
 
+// chooseWrites: changes go over MQTT first (#605) when the device is usable there under the strict rule (its own
+// GroupTopic read, no other device's unread), unless MQTT reads of the device just went unanswered and HTTP works.
+// Otherwise HTTP, and when HTTP is failing too there is no path. The router keeps a change of the device's MQTT
+// connection (cmdpolicy.CutOffName), a write with secret arguments, a GPIO template and a console or bulk command
+// that cmdpolicy.ShownInFull does not show in full on HTTP first while HTTP is not failing; the sentence says so,
+// since it stands for every change.
 func chooseWrites(f Facts) (Path, string) {
-	if !httpFailing(f) {
-		return HTTP, "over the device's HTTP API"
+	why := mqttBlocker(f, true)
+	switch {
+	case why == "" && httpFailing(f):
+		return MQTT, "over MQTT, because " + httpFailText(f.HTTP)
+	case why == "" && !f.MQTT.ReadsUnansweredSince.IsZero():
+		return HTTP, "over the device's HTTP API, the switches too, because a read over MQTT got no answer from the device (since " +
+			f.MQTT.ReadsUnansweredSince.UTC().Format("15:04 UTC") + "); MQTT is tried again after a few minutes"
+	case why == "":
+		return MQTT, "over MQTT first (the device is online on TasmoFleet's broker and its topic is its own); over HTTP if nothing could be published. " +
+			"A change of the device's MQTT connection (topic, broker, login), a password or Wi-Fi name and a GPIO template go over HTTP first, " +
+			"and so does a console or bulk command whose arguments the audit log hides (shown there as \"Name ***\")"
+	case !httpFailing(f):
+		return HTTP, "over the device's HTTP API, the switches too, because changing the device over MQTT is not possible: " + why
 	}
-	if why := mqttBlocker(f, true); why != "" {
-		return None, noPath(httpFailText(f.HTTP), "changing the device over MQTT is not possible: "+why)
-	}
-	return MQTT, "over MQTT, because " + httpFailText(f.HTTP)
+	return None, noPath(httpFailText(f.HTTP), "changing the device over MQTT is not possible: "+why)
 }
 
 func chooseBackup(f Facts) (Path, string) {

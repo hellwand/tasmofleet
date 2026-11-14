@@ -1043,6 +1043,10 @@ func TestCommandsThatRunOtherCommandsAreRefused(t *testing.T) {
 		`Rule1 ON System#Boot DO Status 0 ENDON`, `Rule ON System#Boot DO Status 0 ENDON`, `RuleTimer1 5`,
 		`WebSend [192.0.2.1] Status 0`, `WebQuery http://192.0.2.1/cm?cmnd=Status%200 GET`, `Br print(1)`, `Script >D`, `UfsRun x.be`,
 		`Backlog Power ON; Json {"Status":0}`, `Backlog Publish cmnd/plug/Status 0`,
+		// If runs its command block (Tasmota compiles it with rules alone); DevGroupSend 128=... runs a command on
+		// the group, this device included, and LoRaCommand on another device (#605 review).
+		`If (1==1) Status 0`, `IF (1==1) Status 0 ENDIF`, `Backlog Power 1; If (1==1) Status 0`, `If (1==1) WebPassword hunter2`,
+		`DevGroupSend 128=Status 0`, `DevGroupSend2 128=Status 0`, `LoRaCommand receiver Status 0`,
 	} {
 		b := &fakeBus{}
 		c := newChan(b)

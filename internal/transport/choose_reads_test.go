@@ -8,7 +8,7 @@ import (
 
 // Why (#456 A): a device on TasmoFleet's broker that is online answers reads over MQTT, so a device
 // HTTP cannot reach (or a tile that has not been polled lately) never decides the read path. Writes
-// keep their order (HTTP unless failing) until stage 2.
+// follow the stricter rule of #605 (choose_writes_test.go): the same, plus a read GroupTopic.
 func TestReadsGoOverMQTTFirst(t *testing.T) {
 	cases := []struct {
 		name  string
@@ -17,8 +17,8 @@ func TestReadsGoOverMQTTFirst(t *testing.T) {
 		write Path
 		note  string // substring of the reads reason
 	}{
-		{"on our broker and live, HTTP ok: MQTT", func(f *Facts) {}, MQTT, HTTP, "MQTT first"},
-		{"on our broker and live, HTTP unknown: MQTT", func(f *Facts) { f.HTTP = HTTPState{} }, MQTT, HTTP, "MQTT first"},
+		{"on our broker and live, HTTP ok: MQTT", func(f *Facts) {}, MQTT, MQTT, "MQTT first"},
+		{"on our broker and live, HTTP unknown: MQTT", func(f *Facts) { f.HTTP = HTTPState{} }, MQTT, MQTT, "MQTT first"},
 		{"on our broker and live, HTTP failing: MQTT, and says why", func(f *Facts) { *f = httpDown(*f) }, MQTT, MQTT, "cannot reach the device over HTTP"},
 		// Why (review of PR 626): a device whose MQTT reads went unanswered is read over HTTP while HTTP
 		// works; when HTTP fails, MQTT is all there is.
