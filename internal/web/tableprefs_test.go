@@ -75,6 +75,16 @@ func TestValidatePref(t *testing.T) {
 		{"own widths", "table.devices", `{"w":{"name":25},"b":true}`, `{"w":{"name":25},"b":true}`, false},
 		{"own widths without widths", "table.devices", `{"h":["family"],"b":true}`, `{"h":["family"]}`, false},
 		{"own widths of a table of shares", "table.audit", `{"w":{"actor":20},"b":true}`, `{"w":{"actor":20}}`, false},
+		// #828: "c" marks the content widths of a pixel table, drawn as they are; the row menu of the device
+		// table fits its button and has no width to store, a stored one is dropped (an open page of an older
+		// version may still send it)
+		{"content widths", "table.devices", `{"w":{"name":25,"status":16},"c":true}`, `{"w":{"name":25,"status":16},"c":true}`, false},
+		{"content widths replace own widths", "table.devices", `{"w":{"name":25},"b":true,"c":true}`, `{"w":{"name":25},"c":true}`, false},
+		{"content widths without widths", "table.devices", `{"h":["family"],"c":true}`, `{"h":["family"]}`, false},
+		{"content widths of a table of shares", "table.audit", `{"w":{"actor":20},"c":true}`, `{"w":{"actor":20}}`, false},
+		{"the row menu has no width", "table.devices", `{"w":{"name":25,"actions":15.9},"c":true}`, `{"w":{"name":25},"c":true}`, false},
+		{"the row menu's width alone stores nothing", "table.devices", `{"w":{"actions":5}}`, "", false},
+		{"a table of shares keeps its actions share", "table.audit", `{"w":{"details":8}}`, `{"w":{"details":8}}`, false},
 		{"not json", "table.devices", `[`, "", true},
 		{"trailing data", "table.devices", `{} {}`, "", true},
 		{"oversize", "table.devices", `{"h":["` + strings.Repeat("a", maxPrefBytes) + `"]}`, "", true},
@@ -181,7 +191,7 @@ const sampleTable = `<p>x</p><table class="devtable dense" data-table="devices">
 // column widths, no forced layout) but still carry the menu.
 func TestApplyTablePrefsDefaults(t *testing.T) {
 	out := string(applyTablePrefs([]byte(sampleTable), nil))
-	for _, want := range []string{`class="devtable dense pl1 pl2 hc11 hc12 pr13 pr14"`, `data-cols=",name:28:l:fix,status:17,reach:15,firmware:14,family:10,address:13,uptime:11,wifi:12,restart:18,otaurl:24:off,grouptopic:14:off,power:7:r,actions:5:r:fix"`,
+	for _, want := range []string{`class="devtable dense pl1 pl2 hc11 hc12 pr14 pr15"`, `data-cols=",name:28:l:fix,status:17,reach:15,firmware:14,family:10,address:13,uptime:11,wifi:12,restart:18,otaurl:24:off,grouptopic:14:off,~,power:7:r,actions:5:r:fix"`,
 		`data-order="status,reach,firmware,family,address,uptime,wifi,restart,otaurl,grouptopic,power"`, `<div class="tablewrap" data-key="devices">`, `<div class="tablescroll"><table`, `data-colid="family" checked`, `data-cols-reset`, `<col class="c-sel">`, "</table></div></div><p>y</p>"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("missing %q in\n%s", want, out)
@@ -197,11 +207,12 @@ func TestApplyTablePrefsDefaults(t *testing.T) {
 
 // Why: the saved layout is written into the HTML on the server so the first
 // paint is right; hidden columns get no <col> (a hidden cell takes no column)
-// and the visible widths always add up to 100 percent.
+// and the visible widths of a table of shares always add up to 100 percent
+// (the device table has pixels, TestPixelTableDrawsItsColumnsInPixels).
 func TestApplyTablePrefsAppliesWidthsAndHidden(t *testing.T) {
 	prefs := map[string]string{"table.devices": `{"w":{"name":40,"status":10},"h":["family","uptime"]}`}
 	out := string(applyTablePrefs([]byte(sampleTable), prefs))
-	for _, want := range []string{`tfix`, `hc6`, `hc8`, `<col data-id="name"`, `data-colid="family">`} {
+	for _, want := range []string{`tfix`, `hc6`, `hc8`, `<col data-id="name" width="400">`, `data-colid="family">`} {
 		if !strings.Contains(out, want) {
 			t.Errorf("missing %q in\n%s", want, out)
 		}
@@ -209,7 +220,12 @@ func TestApplyTablePrefsAppliesWidthsAndHidden(t *testing.T) {
 	if strings.Contains(out, `c-sel`) || strings.Contains(out, `data-id="family"`) || strings.Contains(out, `data-id="uptime"`) {
 		t.Errorf("old colgroup kept or hidden column still has a col: %s", out)
 	}
-	sum := selectShare
+	audit := `<table data-table="audit"><thead><tr><th>When</th><th>User</th><th>Action</th><th>Target</th><th>Summary</th><th>Result</th><th>Details</th></tr></thead><tbody></tbody></table>`
+	out = string(applyTablePrefs([]byte(audit), map[string]string{"table.audit": `{"w":{"actor":40,"action":10},"h":["target"]}`}))
+	if strings.Contains(out, `data-id="target"`) || !strings.Contains(out, `<col data-id="actor"`) {
+		t.Errorf("audit: hidden column still has a col, or a width is missing: %s", out)
+	}
+	sum := 0.0
 	for _, m := range regexp.MustCompile(`<col data-id="[a-z]+" width="([0-9.]+)%">`).FindAllStringSubmatch(out, -1) {
 		var v float64
 		_, _ = fmt.Sscanf(m[1], "%f", &v)
@@ -490,10 +506,10 @@ func TestDevicesSortIsRememberedPerUser(t *testing.T) {
 func TestColumnOrderIsRenderedOnTheServer(t *testing.T) {
 	in := sampleWithRow()
 	out := string(applyTablePrefs([]byte(in), map[string]string{"table.devices": `{"o":["address","status"]}`}))
-	if !strings.Contains(out, `<tr><td>S</td><td>n</td><td>ad</td><td>st</td><td>mh</td><td>fw</td><td>fa</td><td>up</td><td>wi</td><td>re</td><td>ot</td><td>gt</td><td>po</td><td>ac</td></tr>`) {
+	if !strings.Contains(out, `<tr><td>S</td><td>n</td><td>ad</td><td>st</td><td>mh</td><td>fw</td><td>fa</td><td>up</td><td>wi</td><td>re</td><td>ot</td><td>gt</td>`+spareTD+`<td>po</td><td>ac</td></tr>`) {
 		t.Errorf("body cells not moved:\n%s", out)
 	}
-	if got := heads(out); got != ",Name,Address,Status,MQTT · HTTP,Firmware,Chip,Uptime,Wi-Fi,Last restart,OTA URL,Group topic,Power,Actions" {
+	if got := heads(out); got != ",Name,Address,Status,MQTT · HTTP,Firmware,Chip,Uptime,Wi-Fi,Last restart,OTA URL,Group topic,,Power,Actions" {
 		t.Errorf("header order %q", got)
 	}
 	if !strings.Contains(out, `data-cols=",name:28:l:fix,address:13,status:17,`) || !strings.Contains(out, "tfix") || !strings.Contains(out, `<td colspan="13">empty</td>`) {
@@ -507,6 +523,9 @@ func TestColumnOrderIsRenderedOnTheServer(t *testing.T) {
 		t.Error("default order changed")
 	}
 }
+
+// spareTD is the empty cell a pixel table has before the columns pinned right (#828).
+const spareTD = `<td class="spare" aria-hidden="true"></td>`
 
 // sampleWithRow is sampleTable with one data row whose cells name their column.
 func sampleWithRow() string {
@@ -531,13 +550,13 @@ func heads(out string) string {
 func TestPinnedColumnsAreGroupedAtTheirEdge(t *testing.T) {
 	in := sampleWithRow()
 	out := string(applyTablePrefs([]byte(in), map[string]string{"table.devices": `{"p":{"wifi":"left","status":"right"}}`}))
-	if got := heads(out); got != ",Name,Wi-Fi,MQTT · HTTP,Firmware,Chip,Address,Uptime,Last restart,OTA URL,Group topic,Status,Power,Actions" {
+	if got := heads(out); got != ",Name,Wi-Fi,MQTT · HTTP,Firmware,Chip,Address,Uptime,Last restart,OTA URL,Group topic,,Status,Power,Actions" {
 		t.Errorf("header order %q", got)
 	}
-	if !strings.Contains(out, `<tr><td>S</td><td>n</td><td>wi</td><td>mh</td><td>fw</td><td>fa</td><td>ad</td><td>up</td><td>re</td><td>ot</td><td>gt</td><td>st</td><td>po</td><td>ac</td></tr>`) {
+	if !strings.Contains(out, `<tr><td>S</td><td>n</td><td>wi</td><td>mh</td><td>fw</td><td>fa</td><td>ad</td><td>up</td><td>re</td><td>ot</td><td>gt</td>`+spareTD+`<td>st</td><td>po</td><td>ac</td></tr>`) {
 		t.Errorf("body cells not grouped:\n%s", out)
 	}
-	if !strings.Contains(out, `class="devtable dense pl1 pl2 pl3 hc10 hc11 pr12 pr13 pr14 tfix"`) {
+	if !strings.Contains(out, `class="devtable dense pl1 pl2 pl3 hc10 hc11 pr13 pr14 pr15 tfix"`) {
 		t.Errorf("pin classes wrong:\n%s", out)
 	}
 	for _, want := range []string{
@@ -550,15 +569,15 @@ func TestPinnedColumnsAreGroupedAtTheirEdge(t *testing.T) {
 		}
 	}
 	unpinned := string(applyTablePrefs([]byte(in), map[string]string{"table.devices": `{"p":{"power":"none"},"o":["power","status"]}`}))
-	if got := heads(unpinned); got != ",Name,Power,Status,MQTT · HTTP,Firmware,Chip,Address,Uptime,Wi-Fi,Last restart,OTA URL,Group topic,Actions" {
+	if got := heads(unpinned); got != ",Name,Power,Status,MQTT · HTTP,Firmware,Chip,Address,Uptime,Wi-Fi,Last restart,OTA URL,Group topic,,Actions" {
 		t.Errorf("unpinned Power: header order %q", got)
 	}
-	if strings.Contains(unpinned, " pr3") || !strings.Contains(unpinned, " pr14") {
+	if strings.Contains(unpinned, " pr3") || !strings.Contains(unpinned, " pr15") {
 		t.Errorf("unpinned Power must not stick, Actions must:\n%s", unpinned)
 	}
 	// a layout saved before pinning existed reads as the defaults
 	old := string(applyTablePrefs([]byte(in), map[string]string{"table.devices": `{"w":{"name":30}}`}))
-	if !strings.Contains(old, " pr13 pr14") || !strings.Contains(old, "pl1 pl2") {
+	if !strings.Contains(old, " pr14 pr15") || !strings.Contains(old, "pl1 pl2") {
 		t.Errorf("an old layout lost the default pins:\n%s", old)
 	}
 }
@@ -575,68 +594,104 @@ func TestNoColumnsMenuAboveATableWithFewerThanTwoRows(t *testing.T) {
 	}
 }
 
-// Why (design v2, P2): the device table has the prototype's pixel widths and scrolls sideways.
-// A saved layout must keep that size, or widening one column would squeeze every other column
-// into the frame and the widened one would end up narrower than before. The server marks the
-// table (data-px) and names the width the saved weights add up to (tenths of pixels, plus the
-// selection column as the browser draws it, see TestPixelTableCountsTheSelectionColumnAsDrawn),
-// which tables.js applies as the table's minimum width. Only a layout saved with its own widths
-// ("b", #805) has a size; TestPixelTableLayoutSavedBeforeOwnWidthsIsProportional has the others.
-func TestPixelTableKeepsItsSizeWithASavedLayout(t *testing.T) {
+// Why (design v2, P2; #828): the device table has pixel widths and scrolls sideways. A column is as
+// wide as the person set it, in pixels, and nothing else: no frame stretches it, and widening one
+// column takes nothing from the others (the table grows and scrolls). The server writes the widths
+// in pixels (tenths in the saved layout, "c") and names the table's width (data-basew): the selection
+// column at its checkbox (43 px), the data columns, and the row menu at its button (48 px), which is
+// never a saved width. tables.js computes the same number, so a page and its reload agree.
+func TestPixelTableDrawsItsColumnsInPixels(t *testing.T) {
 	def := string(applyTablePrefs([]byte(sampleTable), nil))
-	if !strings.Contains(def, " data-px") || strings.Contains(def, "data-basew") {
+	if !strings.Contains(def, " data-px") || strings.Contains(def, "data-basew") || strings.Contains(def, "data-legacy") {
 		t.Errorf("default layout: want data-px and no saved size:\n%s", def)
 	}
-	saved := string(applyTablePrefs([]byte(sampleTable), map[string]string{"table.devices": `{"w":{"firmware":18,"family":6},"b":true}`}))
-	// 28+17+15+18+6+13+11+12+18+7+5 = 150 tenths of pixels; at 1500 px the selection column is
-	// 3.5 % of the table: 1500 / 0.965 = 1554.4
-	if !strings.Contains(saved, `data-basew="1554"`) {
-		t.Errorf("saved layout: want data-basew=\"1554\":\n%s", saved)
+	saved := string(applyTablePrefs([]byte(sampleTable), map[string]string{"table.devices": `{"w":{"firmware":18,"family":6,"actions":15.9},"c":true}`}))
+	for _, want := range []string{
+		`<colgroup><col width="43"><col data-id="name" width="280"><col data-id="status" width="170">`,
+		`<col data-id="firmware" width="180"><col data-id="family" width="60">`,
+		// the room a wider frame has spare goes to the empty column before the columns pinned right
+		`<col class="spare"><col data-id="power" width="70"><col data-id="actions" width="48"></colgroup>`,
+		// 43 + (28+17+15+18+6+13+11+12+18+7) tenths + 48 = 43 + 1450 + 48
+		`data-basew="1541"`,
+	} {
+		if !strings.Contains(saved, want) {
+			t.Errorf("saved layout: missing %q in\n%s", want, saved)
+		}
+	}
+	if strings.Contains(saved, "data-legacy") || strings.Contains(saved, "%") {
+		t.Errorf("a layout of content widths is drawn as it is, in pixels:\n%s", saved)
+	}
+	// a layout without widths (only hidden columns) has the default widths, which are no stretch either
+	hid := string(applyTablePrefs([]byte(sampleTable), map[string]string{"table.devices": `{"h":["family"]}`}))
+	if !strings.Contains(hid, `data-basew="1441"`) || strings.Contains(hid, "data-legacy") {
+		t.Errorf("hidden columns only: want data-basew 1541 - 100:\n%s", hid)
 	}
 }
 
-// Why (#805): data-basew is the table's minimum width. The selection column is drawn at 3.5 % of
-// the table, but never narrower than its checkbox (43 px, which the fit in tables.js gives it). A
-// fixed 44 px made a table that fitted its frame 1 px too wide after a reload below about 1230 px
-// (a scrollbar that scrolls 1 px), and above that it gave the data columns less than saved (the
-// 69 px column of a 1977 px table counted as 44), so the table changed width on the next live
-// reload. tables.js computes the same number (tableWidth), so a page and its reload agree.
-func TestPixelTableCountsTheSelectionColumnAsDrawn(t *testing.T) {
-	cases := []struct{ name, layout, want string }{
-		// the maintainer's layout (#805): 1165 px of data columns; 3.5 % of 1208 is 42.3, less than the checkbox
-		{"narrow: the checkbox's width", `{"w":{"actions":5.7,"address":13.3,"family":9.8,"firmware":9.3,"name":22.8,"power":7.5,"reach":14.2,"status":10.5,"uptime":11.5,"wifi":11.9},"h":["restart"],"b":true}`, `data-basew="1208"`},
-		// 1908 px of data columns: the selection column is 3.5 % of 1908 / 0.965 = 1977.2
-		{"wide: 3.5 % of the table", `{"w":{"name":28.7,"status":13.2,"wifi":15,"reach":17.9,"firmware":11.7,"family":12.4,"address":16.7,"uptime":14.5,"restart":14.7,"otaurl":14.7,"grouptopic":14.7,"power":9.4,"actions":7.2},"v":["grouptopic","otaurl"],"b":true}`, `data-basew="1977"`},
+// Why (#828): a layout saved before this version holds widths that are no content widths. Before 0.36.1 a save
+// stored the widths the browser drew, stretched to the frame (no "b"); 0.36.1 stored them scaled to the table's
+// scroll floor ("b"), so Address came back 86 px wide for 156 px of content. Only the browser knows the content
+// widths, so the server draws the stored pixels and says what they are (data-legacy), tables.js lays them out so
+// that no column is narrower than its content, and the next save stores content widths ("c"). The row menu's
+// stored width is ignored in both.
+func TestPixelTableLayoutsSavedBefore828AreMarkedForTheBrowser(t *testing.T) {
+	cases := []struct{ name, layout, legacy string }{
+		{"before 0.36.1: stretched", `{"w":{"actions":15.9,"address":12.6,"name":33.3},"h":["power"]}`, `data-legacy="shares"`},
+		{"0.36.1: scaled to the floor", `{"w":{"actions":8.2,"address":8.6,"name":17.5},"h":["power"],"b":true}`, `data-legacy="px"`},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			out := string(applyTablePrefs([]byte(sampleTable), map[string]string{"table.devices": c.layout}))
-			if !strings.Contains(out, c.want) {
-				t.Errorf("want %s in\n%s", c.want, out)
+			if !strings.Contains(out, c.legacy) || strings.Contains(out, "data-basew") {
+				t.Errorf("want %s and no size of its own in\n%s", c.legacy, out)
+			}
+			if !strings.Contains(out, `<col data-id="actions" width="48">`) {
+				t.Errorf("the row menu fits its button, whatever was stored:\n%s", out)
+			}
+			if !regexp.MustCompile(`<col data-id="name" width="(333|175)">`).MatchString(out) {
+				t.Errorf("the stored pixels are drawn until tables.js has the content widths:\n%s", out)
 			}
 		})
 	}
 }
 
-// Why (#805): before 0.36.1 a save stored the widths the browser drew, stretched to the frame, so
-// such a layout (no "b") holds widths nobody chose: the maintainer's layout came back 1977 px wide
-// in a 1574 px frame after showing three columns. Its total cannot be trusted, its proportions can:
-// it is laid out like a layout of shares (the colgroup as before, no minimum width of its own), so it
-// fits the window down to the scroll floor of tables.js, and the next save stores widths with "b".
-func TestPixelTableLayoutSavedBeforeOwnWidthsIsProportional(t *testing.T) {
-	old := `{"w":{"name":28.7,"status":13.2,"wifi":15,"reach":17.9,"firmware":11.7,"family":12.4,"address":16.7,"uptime":14.5,"restart":14.7,"otaurl":14.7,"grouptopic":14.7,"power":9.4,"actions":7.2},"v":["grouptopic","otaurl"]}`
-	out := string(applyTablePrefs([]byte(sampleTable), map[string]string{"table.devices": old}))
-	for _, want := range []string{" data-px", "tfix", `<col data-id="name" width="14.52%">`} {
-		if !strings.Contains(out, want) {
-			t.Errorf("missing %q in\n%s", want, out)
-		}
+// Why (#828): when the frame is wider than the table, the room left over is shown as empty room after the last
+// data column, before the columns pinned right: it goes to no column (the row menu was 159 px wide for a 48 px
+// button, and the empty part of it read as part of Uptime), and the row menu stays at the frame's right edge. The
+// server gives every row an empty cell there; it is no column of the registry, so the Columns menu has no row
+// for it and it moves with the pins.
+func TestPixelTableHasASpareCellBeforeTheColumnsPinnedRight(t *testing.T) {
+	in := sampleWithRow()
+	spare := spareTD
+	for _, c := range []struct{ name, layout, row, classes string }{
+		{"default layout", "", `<td>gt</td>` + spare + `<td>po</td><td>ac</td></tr>`, `pl1 pl2 hc11 hc12 pr14 pr15`},
+		{"saved layout", `{"w":{"name":30},"c":true}`, `<td>gt</td>` + spare + `<td>po</td><td>ac</td></tr>`, `pl1 pl2 hc11 hc12 pr14 pr15 tfix`},
+		{"Power unpinned", `{"p":{"power":"none"}}`, `<td>po</td>` + spare + `<td>ac</td></tr>`, `pl1 pl2 hc11 hc12 pr15`},
+		{"Status pinned right", `{"p":{"status":"right"}}`, `<td>gt</td>` + spare + `<td>st</td><td>po</td><td>ac</td></tr>`, `pr14 pr15`},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			prefs := map[string]string{}
+			if c.layout != "" {
+				prefs["table.devices"] = c.layout
+			}
+			out := string(applyTablePrefs([]byte(in), prefs))
+			if !strings.Contains(out, c.row) || !strings.Contains(out, `<th class="spare" aria-hidden="true"></th>`) {
+				t.Errorf("want the spare cell before the columns pinned right (%s) in\n%s", c.row, out)
+			}
+			if !strings.Contains(out, c.classes) || !strings.Contains(out, ",~,") {
+				t.Errorf("want classes %q and the spare column in data-cols:\n%s", c.classes, out)
+			}
+			if strings.Count(out, `class="spare"`) != 3 { // header, row, <col>; the rows of one spanning cell keep their cell
+				t.Errorf("want one spare cell per row and one <col>:\n%s", out)
+			}
+			if strings.Contains(out, `data-colrow="~"`) || strings.Contains(out, `data-colid="~"`) {
+				t.Errorf("the spare room is no column of the Columns menu:\n%s", out)
+			}
+		})
 	}
-	if strings.Contains(out, "data-basew") {
-		t.Errorf("a layout saved before #805 has no size of its own:\n%s", out)
-	}
-	// a layout without widths (only hidden columns) has the default widths, which are no stretch
-	hid := string(applyTablePrefs([]byte(sampleTable), map[string]string{"table.devices": `{"h":["family"]}`}))
-	if !strings.Contains(hid, "data-basew=") {
-		t.Errorf("hidden columns only: want data-basew:\n%s", hid)
+	// a table of shares fills its frame: no spare room
+	audit := `<table data-table="audit"><thead><tr><th>When</th><th>User</th><th>Action</th><th>Target</th><th>Summary</th><th>Result</th><th>Details</th></tr></thead><tbody><tr><td>a</td><td>b</td><td>c</td><td>d</td><td>e</td><td>f</td><td>g</td></tr></tbody></table>`
+	if out := string(applyTablePrefs([]byte(audit), nil)); strings.Contains(out, "spare") {
+		t.Errorf("a table of shares has no spare cell:\n%s", out)
 	}
 }

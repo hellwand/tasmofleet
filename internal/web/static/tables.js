@@ -16,10 +16,17 @@
   var SCROLL_MIN_PX = 96; // below this per column a table with a saved layout scrolls instead of squeezing
   var MIN_PCT = 3; // the server clamps to the same share
   var MAX_PCT = 90; // and to the same maximum
-  // The checkbox column of a table with pixel widths (data-px) at its narrowest: the width of its
-  // checkbox, which fitPinned gives it while 3.5 % of the table is less (tableprefs.go: selectPx).
+  // The checkbox column of a table with pixel widths (data-px): the width of its checkbox
+  // (tableprefs.go: selectPx).
   var SELECT_PX = 43;
   var SELECT_PCT = 3.5; // leading checkbox column, as on the server
+  // A table with pixel widths (data-px, the device list) draws every column at the width the person set,
+  // in pixels of content, and nothing else (#828): no frame stretches a column, a fit or a drag changes only
+  // the column it acts on, and a frame wider than the table keeps what it has spare in an empty cell before
+  // the columns pinned right (SPARE, a column of data-cols that is none of the registry's). Its row menu
+  // column is as wide as its button and padding (ACT_PX, tableprefs.go menuPx) and has no saved width.
+  var ACT_PX = 48;
+  var SPARE = "~";
   var desktop = window.matchMedia("(min-width: 45rem)"); // the table (not the phone list) shows from here
   var timers = {};
   var openKey = "";
@@ -103,6 +110,16 @@
   // fix = pinned for good (cannot move or be unpinned). The selection column ("") is pinned left.
   function cols(table) {
     return (table.getAttribute("data-cols") || "").split(",").map(function (s) {
+      if (s === SPARE) {
+        return {
+          id: SPARE,
+          def: 0,
+          off: false,
+          side: "",
+          fix: true,
+          spare: true,
+        };
+      }
       var p = s.split(":");
       if (p.length < 2) {
         return { id: s, def: 0, off: false, side: "l", fix: true };
@@ -137,7 +154,7 @@
       th = headers(table),
       out = [];
     for (var i = 0; i < c.length && i < th.length; i++) {
-      if (c[i].id === "" || hid[i]) {
+      if (c[i].id === "" || c[i].spare || hid[i]) {
         continue;
       }
       out.push({
@@ -158,64 +175,26 @@
     });
   }
 
-  // The width a table with pixel widths needs for `data` pixels of data columns: the checkbox column
-  // as the browser draws it, 3.5 % of the table but never narrower than its checkbox (#805: a fixed
-  // 44 px made a table that fitted its frame come back 1 px too wide). tableprefs.go: tableWidth.
-  function tableWidth(table, data) {
-    return hasSelect(table)
-      ? Math.max(data + SELECT_PX, data / (1 - SELECT_PCT / 100))
-      : data;
+  function pxTable(table) {
+    return table.hasAttribute("data-px");
   }
-  // and back: the data columns' share of such a table
-  function dataWidth(table, width) {
-    return hasSelect(table)
-      ? Math.min(width - SELECT_PX, width * (1 - SELECT_PCT / 100))
-      : width;
+  // the row menu of a table with pixel widths: as wide as its button, never a saved width (#828)
+  function isMenu(table, col) {
+    return pxTable(table) && col.fix && col.side === "r";
   }
 
-  // The widths the layout itself asks for, per visible data column ({px: id -> px, s: px of the
-  // layout per drawn px}). A table with pixel widths is never narrower than its layout and fills a
-  // wider frame, so the browser draws every column wider than the layout says, and a pinned column
-  // can be widened to its content. A save took the drawn widths: it stored that stretch, and showing a
-  // column turned the stretched widths of all the others into the layout (#805). So the drawn widths
-  // are scaled back to the layout's own total: the data columns' share of data-basew, or, without one
-  // (the default layout, or a layout saved before this was fixed, which tableprefs.go lays out as
-  // shares), their width at the table's narrowest. A table of shares (no data-px) stores proportions,
-  // which a stretch does not change.
+  // The widths of the layout, per visible data column ({px: id -> px}): the widths the browser draws.
+  // A table with pixel widths draws every column at its own width (#828: no stretch to the frame, which a
+  // save used to store, #805), and its row menu is no width of the layout. A table of shares (no data-px)
+  // fills its frame and stores proportions, which the stretch does not change.
   function layoutWidths(table) {
-    var vis = visible(table),
-      drawn = 0,
-      px = {};
-    vis.forEach(function (v) {
-      drawn += v.px;
-    });
-    var own = drawn;
-    if (table.hasAttribute("data-px") && desktop.matches && drawn > 0) {
-      var basew = Number(table.getAttribute("data-basew"));
-      own = basew > 0 ? dataWidth(table, basew) : narrowest(table);
-    }
-    var s = drawn > 0 && own > 0 ? own / drawn : 1;
-    vis.forEach(function (v) {
-      px[v.id] = v.px * s;
-    });
-    return { px: px, s: s };
-  }
-  // the data columns' width with the table at its minimum width, not stretched to the frame: set for
-  // one measurement and put back before anything is painted
-  function narrowest(table) {
-    var w = table.style.width,
-      min = table.style.minWidth,
-      sum = 0;
-    table.style.width = "0px";
-    if (!table.classList.contains("tfix")) {
-      table.style.minWidth = "0px"; // the default layout's CSS minimum is the frame (app.css)
-    }
+    var px = {};
     visible(table).forEach(function (v) {
-      sum += v.px;
+      if (!isMenu(table, v)) {
+        px[v.id] = v.px;
+      }
     });
-    table.style.width = w;
-    table.style.minWidth = min;
-    return sum;
+    return { px: px };
   }
 
   // Whole pixels that add up to the rounded total: each column rounded on its own let the sum drift by
@@ -262,20 +241,25 @@
       x.removeAttribute("data-tip");
       x.removeAttribute("data-autotitle");
     });
-    var fixed = hasSelect(table) ? SELECT_PCT : 0;
-    var total = 0;
+    var px = pxTable(table),
+      fixed = hasSelect(table) ? SELECT_PCT : 0,
+      total = 0,
+      width = hasSelect(table) ? SELECT_PX : 0;
+    var own = function (col) {
+      // a weight of the layout; a column that has none yet (just shown) gets its default
+      return weight[col.id] > 0 ? weight[col.id] : col.def * (px ? 10 : 1);
+    };
     c.forEach(function (col, i) {
-      if (col.id !== "" && !hidden[i]) {
-        total += weight[col.id];
+      if (col.id !== "" && !col.spare && !hidden[i]) {
+        total += own(col);
+        // whole pixels, as they are drawn and saved: the server computes the same number from them
+        width += isMenu(table, col) ? ACT_PX : Math.round(own(col));
       }
     });
-    // a table with pixel widths keeps its size: the weights here are pixels (tableprefs.go: pxTables)
-    if (table.hasAttribute("data-px")) {
-      table.setAttribute(
-        "data-basew",
-        // whole pixels, as they are saved: the server computes the same number from them
-        String(Math.round(tableWidth(table, Math.round(total)))),
-      );
+    // a table with pixel widths is as wide as its columns (tableprefs.go: pxTables); the weights are pixels
+    if (px) {
+      table.setAttribute("data-basew", String(width));
+      table.removeAttribute("data-legacy"); // its widths are content widths from now on
     }
     var cg = document.createElement("colgroup");
     c.forEach(function (col, i) {
@@ -283,13 +267,19 @@
         return;
       }
       var el = document.createElement("col");
-      if (col.id === "") {
-        el.setAttribute("width", SELECT_PCT + "%");
+      if (col.spare) {
+        el.className = "spare"; // no width: what a wider frame has beyond the columns
+      } else if (col.id === "") {
+        el.setAttribute("width", px ? String(SELECT_PX) : SELECT_PCT + "%");
       } else {
         el.setAttribute("data-id", col.id);
         el.setAttribute(
           "width",
-          ((weight[col.id] / total) * (100 - fixed)).toFixed(2) + "%",
+          isMenu(table, col)
+            ? String(ACT_PX)
+            : px
+              ? String(Math.round(own(col)))
+              : ((own(col) / total) * (100 - fixed)).toFixed(2) + "%",
         );
       }
       cg.appendChild(el);
@@ -321,6 +311,10 @@
     }
     if (!table.classList.contains("tfix")) {
       fitPinnedPx(table, cg);
+      return;
+    }
+    if (pxTable(table)) {
+      fitPixels(table, cg);
       return;
     }
     var c = cols(table),
@@ -406,6 +400,228 @@
     }
   }
 
+  // A saved layout of a table with pixel widths (#828): every column at its own width in pixels and the table
+  // as wide as its columns; a wider frame gives the room it has spare to the spare cell, before the columns
+  // pinned right. A pinned column still shows all of its content (it is the one that stays in view): one that
+  // is narrower than its content at its narrowest (min-content) gets that width, the device name at least
+  // NAME_MIN_PX, and the row menu is as wide as its button. Every fit starts from the widths the colgroup came
+  // with (data-w), never from what an earlier fit made of them, so a second fit changes nothing (#806).
+  function fitPixels(table, cg) {
+    var c = cols(table),
+      hid = hiddenIdx(table),
+      kids = cg.children,
+      col = [],
+      n = 0;
+    for (var k = 0; k < c.length; k++) {
+      col.push(hid[k] ? null : kids[n++] || null);
+    }
+    col.forEach(function (el) {
+      if (!el) {
+        return;
+      }
+      if (!el.hasAttribute("data-w")) {
+        el.setAttribute("data-w", el.getAttribute("width") || "");
+      }
+      if (el.getAttribute("data-w")) {
+        el.setAttribute("width", el.getAttribute("data-w"));
+      }
+    });
+    if (!desktop.matches) {
+      table.style.minWidth = "";
+      return;
+    }
+    if (table.hasAttribute("data-legacy")) {
+      convertLegacy(table, c, col);
+    }
+    var th = headers(table),
+      rows = Array.prototype.filter.call(
+        table.querySelectorAll(":scope > tbody > tr"),
+        function (r) {
+          return r.cells.length === c.length;
+        },
+      ),
+      cells = [],
+      at = [];
+    // all cells of the pinned columns are measured in one go: one layout, not one per cell
+    c.forEach(function (cd, i) {
+      if (!cd.side || !col[i]) {
+        return;
+      }
+      if (cd.id !== "") {
+        cells.push(th[i]);
+        at.push(i);
+      }
+      rows.forEach(function (r) {
+        cells.push(r.cells[i]);
+        at.push(i);
+      });
+    });
+    var need = {};
+    minContents(cells).forEach(function (w, k) {
+      need[at[k]] = Math.max(need[at[k]] || 0, w);
+    });
+    Object.keys(need).forEach(function (i) {
+      var cd = c[i],
+        w = need[i];
+      if (isMenu(table, cd)) {
+        w = Math.max(ACT_PX, w - 1); // its button and padding: a button does not wrap, no allowance for it
+      } else if (cd.id !== "" && cd.fix && cd.side === "l") {
+        w = Math.max(w, NAME_MIN_PX);
+      }
+      if (Math.ceil(w) > Number(col[i].getAttribute("width"))) {
+        col[i].setAttribute("width", String(Math.ceil(w)));
+      }
+    });
+    // the table is as wide as its columns (the spare cell has no width of its own)
+    var sum = 0;
+    col.forEach(function (el, i) {
+      if (el && !c[i].spare) {
+        sum += Number(el.getAttribute("width")) || 0;
+      }
+    });
+    table.style.minWidth = sum + "px";
+  }
+
+  // A layout saved before #828 has no content widths (tableprefs.go: tablePref.B): before 0.36.1 the widths a
+  // frame had stretched (data-legacy="shares"), in 0.36.1 the widths scaled to the table's scroll floor ("px"):
+  // Address came back 86 px wide for 156 px of content. It is laid out here with no column narrower than its
+  // content, its floor: the width a fit gives it (the device name: NAME_MIN_PX, it wraps). The next save stores
+  // what is drawn. "px" keeps every stored width that is wide enough. "shares" keeps every stored width,
+  // raised to its floor, if the frame holds that (the room comes out of the spare room, no column pays for
+  // another); else the proportions, at the layout's own total if the frame holds it, else at what the frame
+  // holds, never below the floors; a frame that does not hold the floors gets the layout squeezed into it down
+  // to SCROLL_MIN_PX a column (as #805 did), and below that the table scrolls. A column pinned right that is no
+  // row menu (Power) gets its floor in both. The floors are measured once per page (legacyFloors), so a list
+  // reload lays the table out as before.
+  var legacyFloors = {};
+  function convertLegacy(table, c, col) {
+    var key = keyOf(table),
+      at = [],
+      raw = {},
+      told = 0,
+      menus = 0;
+    c.forEach(function (cd, i) {
+      if (!col[i] || cd.id === "" || cd.spare) {
+        return;
+      }
+      if (isMenu(table, cd)) {
+        menus++;
+        return;
+      }
+      at.push(i);
+      raw[i] = Number(col[i].getAttribute("width")) || cd.def * 10;
+      told += raw[i];
+    });
+    var known = legacyFloors[key] || (legacyFloors[key] = {});
+    at.forEach(function (i) {
+      if (!(c[i].id in known)) {
+        var f = fitWidth(table, i);
+        known[c[i].id] =
+          c[i].fix && c[i].side === "l"
+            ? NAME_MIN_PX
+            : Math.ceil(Math.min(f.want, f.cap));
+      }
+    });
+    // A column pinned right (Power) has no handle and no fit: it gets its floor, never a share, so a stored
+    // share of the old table cannot outlive the conversion (only Reset could narrow it).
+    var floor = {},
+      sumF = 0,
+      w = {},
+      pinned = 0;
+    at.forEach(function (i) {
+      floor[i] = known[c[i].id];
+      if (c[i].side === "r") {
+        w[i] = floor[i];
+        pinned += floor[i];
+        told -= raw[i];
+      }
+    });
+    var all = at;
+    at = at.filter(function (i) {
+      return c[i].side !== "r";
+    });
+    at.forEach(function (i) {
+      sumF += floor[i];
+    });
+    var put = function (got) {
+      at.forEach(function (i) {
+        w[i] = got[i];
+      });
+    };
+    if (table.getAttribute("data-legacy") === "px") {
+      at.forEach(function (i) {
+        w[i] = Math.max(Math.round(raw[i]), floor[i]);
+      });
+    } else {
+      var frame = table.parentElement ? table.parentElement.clientWidth : 0,
+        avail =
+          frame - (hasSelect(table) ? SELECT_PX : 0) - menus * ACT_PX - pinned,
+        raised = {},
+        sumR = 0;
+      at.forEach(function (i) {
+        raised[i] = Math.max(Math.round(raw[i]), floor[i]);
+        sumR += raised[i];
+      });
+      if (sumR <= avail) {
+        // the frame holds every column at its stored width, the narrow ones lifted to their floors: no
+        // column gives up width for them, the room they need comes out of the spare room
+        put(raised);
+      } else if (sumF <= avail) {
+        put(
+          spread(at, raw, told, floor, Math.min(Math.max(told, sumF), avail)),
+        );
+      } else {
+        sumF = 0;
+        at.forEach(function (i) {
+          floor[i] = Math.min(floor[i], SCROLL_MIN_PX);
+          sumF += floor[i];
+        });
+        put(spread(at, raw, told, floor, Math.max(avail, sumF)));
+      }
+    }
+    all.forEach(function (i) {
+      col[i].setAttribute("width", String(w[i]));
+    });
+  }
+  // Whole pixels for the columns at, in proportion to raw (adding up to total), none below its floor (whole
+  // pixels), adding up to the whole pixels of size.
+  function spread(at, raw, total, floor, size) {
+    var lo = 0,
+      hi = size,
+      exact = {},
+      whole = {},
+      got = 0;
+    var sum = function (t) {
+      var s = 0;
+      at.forEach(function (i) {
+        s += Math.max(floor[i], total > 0 ? (raw[i] / total) * t : 0);
+      });
+      return s;
+    };
+    for (var k = 0; k < 40; k++) {
+      var mid = (lo + hi) / 2;
+      if (sum(mid) > size) {
+        hi = mid;
+      } else {
+        lo = mid;
+      }
+    }
+    at.forEach(function (i) {
+      exact[i] = Math.max(floor[i], total > 0 ? (raw[i] / total) * lo : 0);
+      whole[i] = Math.floor(exact[i]);
+      got += whole[i];
+    });
+    at.slice()
+      .sort(function (a, b) {
+        return exact[b] - whole[b] - (exact[a] - whole[a]);
+      })
+      .slice(0, Math.max(0, Math.floor(size) - got))
+      .forEach(function (i) {
+        whole[i]++;
+      });
+    return whole;
+  }
+
   // The default layout of a table with pixel column widths (no saved layout, so no tfix): a pinned
   // column still shows all of its content. A column whose CSS width is narrower than its content (a
   // device with two relays has two switches in Power) gets the content's width in pixels; the table,
@@ -452,8 +668,10 @@
       need[at[k]] = Math.max(need[at[k]] || 0, w);
     });
     Object.keys(need).forEach(function (i) {
-      if (need[i] > th[i].getBoundingClientRect().width) {
-        col[i].style.width = Math.ceil(need[i]) + "px";
+      // the row menu is as wide as its button and padding: a button does not wrap, no allowance for it
+      var w = isMenu(table, c[i]) ? need[i] - 1 : need[i];
+      if (w > th[i].getBoundingClientRect().width) {
+        col[i].style.width = Math.ceil(w) + "px";
       }
     });
     cutAtPins(table, c, col, th);
@@ -492,6 +710,7 @@
       var r = th[i].getBoundingClientRect();
       if (
         c[i].side !== "l" &&
+        !c[i].spare &&
         r.left - x0 < edge - 0.5 &&
         r.right - x0 > edge + 0.5
       ) {
@@ -515,7 +734,11 @@
     // what a column can give: its width down to its content at its narrowest (the device name down to
     // the prototype's minimum, it wraps), never its pinned-for-good neighbours' or the checkbox column
     for (var j = 0; j < s; j++) {
-      if (c[j].id === "" || (c[j].side && !(c[j].fix && c[j].side === "l"))) {
+      if (
+        c[j].id === "" ||
+        c[j].spare ||
+        (c[j].side && !(c[j].fix && c[j].side === "l"))
+      ) {
         continue;
       }
       at.push(j);
@@ -568,7 +791,16 @@
   // live cells are swapped one by one, and probing every row again for each swap was most of the
   // device list's main-thread time. The cache is dropped when the fonts arrive (other widths).
   var minWidths = new WeakMap();
+  var maxWidths = new WeakMap();
   function minContents(cells) {
+    return contents(cells, minWidths, false);
+  }
+  // the same for the content on one line (max-content), without the allowance for a wrap: what a cell
+  // that does not wrap needs to show all of it (#828)
+  function maxContents(cells) {
+    return contents(cells, maxWidths, true);
+  }
+  function contents(cells, cache, oneLine) {
     var keys = cells.map(function (cell) {
       return cell ? cell.className + "|" + cell.innerHTML : "";
     });
@@ -576,16 +808,20 @@
       if (!cell) {
         return null;
       }
-      var known = minWidths.get(cell);
+      var known = cache.get(cell);
       if (known && known.html === keys[k]) {
         return null;
       }
-      var probe = document.createElement("div");
+      var probe = document.createElement(oneLine ? "span" : "div");
       probe.style.position = "absolute";
       probe.style.visibility = "hidden";
       probe.style.left = "0";
       probe.style.top = "0";
-      probe.style.width = "min-content";
+      if (oneLine) {
+        probe.style.whiteSpace = "nowrap";
+      } else {
+        probe.style.width = "min-content";
+      }
       Array.prototype.forEach.call(cell.childNodes, function (n) {
         if (n.nodeType === 1 && n.classList.contains("colhandle")) {
           return;
@@ -597,7 +833,7 @@
     });
     var out = probes.map(function (probe, k) {
       if (!probe) {
-        var known = cells[k] && minWidths.get(cells[k]);
+        var known = cells[k] && cache.get(cells[k]);
         return known ? known.w : 0;
       }
       var cs = getComputedStyle(cells[k]);
@@ -605,8 +841,8 @@
         probe.getBoundingClientRect().width +
         parseFloat(cs.paddingLeft) +
         parseFloat(cs.paddingRight) +
-        1;
-      minWidths.set(cells[k], { html: keys[k], w: w });
+        (oneLine ? 0 : 1);
+      cache.set(cells[k], { html: keys[k], w: w });
       return w;
     });
     probes.forEach(function (probe) {
@@ -735,24 +971,22 @@
   function document_(table) {
     var c = cols(table),
       hid = hiddenIdx(table),
-      vis = visible(table),
-      px = table.hasAttribute("data-px")
-        ? wholePixels(layoutWidths(table).px)
-        : null,
+      drawn = layoutWidths(table).px,
+      px = pxTable(table) ? wholePixels(drawn) : null,
       sum = 0,
       w = {},
       h = [];
-    vis.forEach(function (v) {
-      sum += v.px;
+    Object.keys(drawn).forEach(function (id) {
+      sum += drawn[id];
     });
-    vis.forEach(function (v) {
-      w[v.id] = px
-        ? Math.min(MAX_PCT, Math.max(MIN_PCT, px[v.id] / 10)) // tenths of the pixels
-        : Math.max(MIN_PCT, Math.round((v.px / sum) * 1000) / 10);
+    Object.keys(drawn).forEach(function (id) {
+      w[id] = px
+        ? Math.min(MAX_PCT, Math.max(MIN_PCT, px[id] / 10)) // tenths of the pixels
+        : Math.max(MIN_PCT, Math.round((drawn[id] / sum) * 1000) / 10);
     });
     var v = [];
     c.forEach(function (col, i) {
-      if (col.id === "") {
+      if (col.id === "" || col.spare) {
         return;
       }
       if (col.off) {
@@ -766,7 +1000,7 @@
     });
     var doc = { w: w, h: h, v: v, o: order(table), p: pins(table) };
     if (px) {
-      doc.b = true; // the layout's own widths, without the frame's stretch (#805, tableprefs.go)
+      doc.c = true; // content widths, drawn as they are (#828, tableprefs.go); no row menu among them
     }
     return doc;
   }
@@ -913,11 +1147,13 @@
     // swap, enhance() fits it then, and until then the browser can paint it: the sticky Power column
     // sat on the Actions summary in every row (#727). Fit it in the swap's own task, before any
     // paint, and only the tables this swap brought (a live cell holds none, so it costs a query).
-    t.querySelectorAll("table[data-table][data-cols]").forEach(function (table) {
-      if (laidOut.indexOf(table) < 0) {
-        fitSwapped(table);
-      }
-    });
+    t.querySelectorAll("table[data-table][data-cols]").forEach(
+      function (table) {
+        if (laidOut.indexOf(table) < 0) {
+          fitSwapped(table);
+        }
+      },
+    );
     restoreScroll(t);
     restoreHandleFocus();
   });
@@ -993,24 +1229,23 @@
     return w + parseFloat(cs.paddingLeft) + parseFloat(cs.paddingRight);
   }
 
-  function fitColumn(table, idx) {
-    var vis = visible(table),
-      v = vis[idx];
-    if (!v || vis.length < 2) {
-      return;
-    }
-    var cell = v.th,
-      n = cell.cellIndex;
-    var ths = getComputedStyle(cell);
+  // What a fit makes of column n: its widest content on one line (header with the resize handle, every
+  // visible cell, icons and badges included), and the cap a fit never goes beyond (FIT_CAP_CH).
+  function fitWidth(table, n) {
+    var cell = headers(table)[n],
+      ths = getComputedStyle(cell),
+      cells = [];
     var want = contentWidth(cell, ths) + 12; // 12: the resize handle
     Array.prototype.forEach.call(table.tBodies, function (tb) {
       Array.prototype.forEach.call(tb.rows, function (row) {
         var td = row.cells[n];
-        if (!td || td.colSpan > 1 || row.cells.length <= n) {
-          return;
+        if (td && td.colSpan === 1 && row.cells.length > n) {
+          cells.push(td);
         }
-        want = Math.max(want, contentWidth(td, getComputedStyle(td)));
       });
+    });
+    maxContents(cells).forEach(function (w) {
+      want = Math.max(want, w);
     });
     var zero = document.createElement("span");
     zero.style.position = "absolute";
@@ -1023,42 +1258,68 @@
       parseFloat(ths.paddingLeft) +
       parseFloat(ths.paddingRight);
     cell.removeChild(zero);
-    // the snapshot is in the layout's pixels, the measurements above are drawn ones (#805)
-    var snap = takeSnap(table),
-      s = snap.s,
-      total = 0;
-    vis.forEach(function (x) {
-      total += snap.px[x.id];
+    return { want: want, cap: cap, cells: cells };
+  }
+  // how far the widest of these cells runs on past its box (0: every cell shows all of its content)
+  function overrun(cells) {
+    var over = 0;
+    cells.forEach(function (td) {
+      over = Math.max(over, td.scrollWidth - td.clientWidth);
     });
-    var limit = Math.min(cap * s, total - MIN_PX * s * (vis.length - 1));
-    var target = Math.max(MIN_PX * s, Math.min(want * s, limit));
+    return over;
+  }
+
+  function fitColumn(table, idx) {
+    var vis = visible(table),
+      v = vis[idx];
+    if (!v || (vis.length < 2 && !pxTable(table))) {
+      return;
+    }
+    var fit = fitWidth(table, v.th.cellIndex),
+      snap = takeSnap(table),
+      weight = {};
+    Object.keys(snap.px).forEach(function (id) {
+      weight[id] = snap.px[id];
+    });
+    var target, limit;
     var apply = function (t) {
-      var others = total - snap.px[v.id],
-        scale = (total - t) / others,
-        weight = {};
-      vis.forEach(function (x) {
-        weight[x.id] = x === v ? t : snap.px[x.id] * scale;
-      });
+      if (pxTable(table)) {
+        weight[v.id] = t; // #828: only this column changes; the table grows, or the spare room does
+      } else {
+        // a table of shares fills its frame: the others give (or take) the difference in proportion
+        var total = 0;
+        vis.forEach(function (x) {
+          total += snap.px[x.id];
+        });
+        var scale = (total - t) / (total - snap.px[v.id]);
+        vis.forEach(function (x) {
+          weight[x.id] = x === v ? t : snap.px[x.id] * scale;
+        });
+      }
       write(table, hiddenIdx(table), weight);
     };
+    if (pxTable(table)) {
+      limit = Math.ceil(fit.cap);
+      target = Math.max(MIN_PX, Math.min(Math.ceil(fit.want), limit));
+    } else {
+      var total = 0;
+      vis.forEach(function (x) {
+        total += snap.px[x.id];
+      });
+      limit = Math.min(fit.cap, total - MIN_PX * (vis.length - 1));
+      target = Math.max(MIN_PX, Math.min(fit.want, limit));
+    }
     apply(target);
     // The probe is an estimate (fonts, icons and padding differ between systems): check what the real
-    // cells now clip and grow by that, up to the cap. All of it runs before the browser paints, so
-    // there is no visible jump.
+    // cells now cut off and grow by that, up to the cap. A cell that is a fraction of a pixel short already
+    // shows its ellipsis, so nothing is tolerated (#828: 155.9 px for 156 px cut every address). All of it
+    // runs before the browser paints, so there is no visible jump.
     for (var pass = 0; pass < 3 && target < limit; pass++) {
-      var over = 0;
-      Array.prototype.forEach.call(table.tBodies, function (tb) {
-        Array.prototype.forEach.call(tb.rows, function (row) {
-          var td = row.cells[n];
-          if (td && td.colSpan === 1 && row.cells.length > n) {
-            over = Math.max(over, td.scrollWidth - td.clientWidth);
-          }
-        });
-      });
-      if (over <= 1) {
+      var over = overrun(fit.cells);
+      if (over <= 0) {
         break;
       }
-      target = Math.min(limit, target + Math.ceil(over) * s);
+      target = Math.min(limit, target + Math.ceil(over));
       apply(target);
     }
     save(table, true);
@@ -1067,16 +1328,26 @@
   // ---- resizing ----
 
   function setWidths(table, snap, idx, dx) {
-    // idx: index in the visible data columns; the neighbour pays for the change
+    // idx: index in the visible data columns
     var vis = visible(table);
     var a = vis[idx],
-      b = vis[idx + 1] || vis[idx - 1];
+      b = vis[idx + 1] || vis[idx - 1],
+      weight = {};
+    if (a && pxTable(table)) {
+      // #828: only this column changes; the table grows and scrolls, or the spare room takes the difference
+      Object.keys(snap.px).forEach(function (id) {
+        weight[id] = snap.px[id];
+      });
+      weight[a.id] = Math.max(MIN_PX, snap.px[a.id] + dx);
+      write(table, hiddenIdx(table), weight);
+      return;
+    }
+    // a table of shares fills its frame: the neighbour pays for the change
     if (!a || !b) {
       return;
     }
-    // dx and MIN_PX are drawn pixels, the snapshot is in the layout's (#805)
-    var d = dx * snap.s,
-      min = MIN_PX * snap.s;
+    var d = dx,
+      min = MIN_PX;
     var wa = snap.px[a.id] + d,
       wb = snap.px[b.id] - d;
     if (wa < min) {
@@ -1087,7 +1358,6 @@
       wa -= min - wb;
       wb = min;
     }
-    var weight = {};
     vis.forEach(function (v) {
       weight[v.id] = snap.px[v.id];
     });
@@ -1103,12 +1373,16 @@
     if (!desktop.matches) {
       return;
     }
-    // No handle on the last column (it takes the remaining width) nor on the columns pinned
-    // right (Power, row actions): they are as wide as their content.
+    // No handle on the columns pinned right (Power, row actions): they are as wide as their content.
+    // In a table of shares the last column has none either (it takes the remaining width); in a table
+    // with pixel widths it has one like any other (#828: the room it gives up becomes spare room).
     var all = visible(table),
       last = all.length - 1;
     while (last >= 0 && all[last].side === "r") {
       last--;
+    }
+    if (pxTable(table)) {
+      last++;
     }
     var vis = all.filter(function (v, n) {
       return n < last && v.side !== "r";
@@ -1266,6 +1540,12 @@
     var px = layoutWidths(table).px,
       sumPx = 0,
       sumDef = 0;
+    if (pxTable(table)) {
+      // #828: its default pixels (the weights are tenths of them); the others keep theirs
+      px[v.id] = v.def * 10;
+      write(table, hiddenIdx(table), px);
+      return;
+    }
     vis.forEach(function (x) {
       sumPx += px[x.id];
       sumDef += x.def;
@@ -1661,7 +1941,9 @@
   // therefore read from the page itself just before the swap.
   document.addEventListener("htmx:beforeSwap", function (e) {
     var target = e.detail && e.detail.target;
-    var open = document.querySelector("details.colmenu[open]:not([data-static])");
+    var open = document.querySelector(
+      "details.colmenu[open]:not([data-static])",
+    );
     if (open && target instanceof Element && target.contains(open)) {
       openKey = open.getAttribute("data-key") || "";
     }
@@ -1815,6 +2097,8 @@
   if (document.fonts && document.fonts.ready) {
     document.fonts.ready.then(function () {
       minWidths = new WeakMap();
+      maxWidths = new WeakMap();
+      legacyFloors = {};
       enhance();
     });
   }

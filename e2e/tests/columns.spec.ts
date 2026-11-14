@@ -155,7 +155,7 @@ test("dragging a column edge resizes it; the width survives a reload and a secon
   // already in the server's HTML: no layout jump after load
   const html = await (await page.request.get(app.url + "/devices", { headers: adam })).text();
   expect(html).toMatch(/<table[^>]*class="[^"]*tfix[^"]*"[^>]*data-table="devices"|<table[^>]*data-table="devices"[^>]*class="[^"]*tfix/);
-  expect(html).toMatch(/<col data-id="firmware" width="[0-9.]+%">/);
+  expect(html).toMatch(/<col data-id="firmware" width="[0-9]+">/); // pixels: the device table's widths are content widths (#828)
 
   const second = await otherBrowser(browser, adam);
   await second.page.goto(app.url + "/devices");
@@ -348,13 +348,17 @@ test("showing a column adds its width and stores the other columns as they were 
     expect(px(one.restart, mean), "the new column gets the mean of the saved widths").toBeLessThanOrEqual(1);
     const shown = await deviceFrame(page);
     expect(shown.scroll, "one more column still fits a 1920 px window").toBeLessThanOrEqual(shown.client);
+    // Two more columns add their own widths and nothing else. (Before #828 three more columns also fitted the
+    // window, but only because the conversion squeezed Name and Status to give Address and Firmware their
+    // content; now those stay as stored and the layout is about 100 px wider, so three means do not fit.)
     await showColumn(page, "otaurl", true);
-    await showColumn(page, "grouptopic", true);
+    const two = (await showColumn(page, "grouptopic", true)).w;
+    for (const id of ids) expect(px(two[id], before[id]), `${id} keeps its saved width when two more columns are shown`).toBeLessThanOrEqual(1);
     const three = await deviceFrame(page);
-    expect(three.scroll, "three more columns still fit a 1920 px window").toBeLessThanOrEqual(three.client);
+    expect(Math.abs(three.min - shown.min - (two.otaurl + two.grouptopic) * 10), "the table grows by the widths of the two columns").toBeLessThanOrEqual(1);
     await page.reload();
     const reloaded = await deviceFrame(page);
-    expect(reloaded.scroll).toBeLessThanOrEqual(reloaded.client);
+    expect(Math.abs(reloaded.min - three.min), "a reload draws the same table").toBeLessThanOrEqual(0.5);
     expect(Math.abs(reloaded.basew - three.basew), "the page and the server give the layout the same size").toBeLessThanOrEqual(0.5);
   } finally {
     await resetAll(page, "/devices", "table.devices");
@@ -366,21 +370,31 @@ test("a saved layout is as wide as its columns: the selection column counts as d
   await page.setExtraHTTPHeaders(adam);
   await page.goto(app.url + "/devices");
   try {
-    // the maintainer's widths as this version saves them: 1165 px of data columns, and the selection
-    // column drawn at its 43 px checkbox (3.5 % of the table is less at this width). The frame is sized
-    // from these numbers, not from the page's data-basew: a page or server that counts the selection
-    // column wrongly would move a frame sized from data-basew along with the table.
-    const data = Math.round(Object.values(ownerLayout.w).reduce((a, b) => a + b, 0) * 10);
-    const need = data + 43;
-    expect(await postPref(page, "table.devices", { ...ownerLayout, b: true })).toBe(204);
+    // the maintainer's widths as this version saves them (content pixels, "c", #828): 1108 px of data
+    // columns, the selection column drawn at its 43 px checkbox and the row menu at its 48 px button (its
+    // stored width is ignored, #828). The frame is sized from these numbers, not from the page's
+    // data-basew: a page or server that counts a column wrongly would move a frame sized from data-basew
+    // along with the table.
+    const data = Math.round(
+      Object.entries(ownerLayout.w)
+        .filter(([id]) => id !== "actions")
+        .reduce((a, [, w]) => a + w, 0) * 10,
+    );
+    const need = data + 43 + 48;
+    expect(await postPref(page, "table.devices", { ...ownerLayout, c: true })).toBe(204);
     await page.reload();
     const wide = await deviceFrame(page);
-    expect(wide.basew, "the saved layout is as wide as its data columns and the drawn checkbox").toBe(need);
+    expect(wide.basew, "the saved layout is as wide as its data columns, the drawn checkbox and the row menu").toBe(need);
     // a window whose frame is exactly that wide: the table fits it; one pixel less and it scrolls by one
     for (const less of [0, 1]) {
-      await page.setViewportSize({ width: 1300 - (wide.client - need) - less, height: 900 });
-      await page.reload();
-      const f = await deviceFrame(page);
+      // the page's side gutter changes near 1280 px, so the window is found by measuring, not by subtracting once
+      let f = wide;
+      for (let viewport = 1300, i = 0; i < 4 && f.client !== need - less; i++) {
+        viewport -= f.client - (need - less);
+        await page.setViewportSize({ width: viewport, height: 900 });
+        await page.reload();
+        f = await deviceFrame(page);
+      }
       expect(f.client, "the frame follows the window").toBe(need - less);
       expect(f.scroll, less ? "one pixel too narrow" : "a frame as wide as the drawn columns fits them").toBe(f.client + less);
     }
@@ -414,6 +428,286 @@ test("a layout stored with stretched widths before 0.36.1 fits its window again,
     expect(after.scroll).toBeLessThanOrEqual(after.client);
     expect(after.widths.length).toBe(start.widths.length);
     after.widths.forEach((w, i) => expect(Math.abs(w - start.widths[i]), `column ${i + 1} after the first save`).toBeLessThanOrEqual(1.5));
+  } finally {
+    await resetAll(page, "/devices", "table.devices");
+  }
+});
+
+// #828. A column of the device table is as wide as the person set it, in pixels of content, and nothing
+// else: the table is as wide as its columns, and when the frame is wider the room left over stays empty
+// after the last data column, before the columns pinned right. Until then every width was a share of a
+// table stretched to its frame: a double-click fit kept the table's total and took the room from (or gave
+// it to) every other column, the room a wide frame had spare went to every column, the row menu included
+// (159 px for a 48 px button), and a fit was stored at the stretch of the window it was made in, so Address,
+// fitted at 1714 px, was cut again at 1287 px. The layout is the maintainer's from the live database, saved
+// by 0.36.0 (stretched widths, no "b"); the issue measured it on a 20-device fleet.
+const owner828 = {
+  w: { actions: 15.9, address: 12.6, family: 12.3, firmware: 14.9, name: 33.3, status: 27.7, uptime: 16, wifi: 19.2 },
+  h: ["power", "reach", "restart"],
+  o: ["status", "reach", "wifi", "firmware", "family", "address", "uptime", "restart", "otaurl", "grouptopic", "power"],
+};
+const names828: Record<string, string> = { name: "Name", status: "Status", wifi: "Wi-Fi", firmware: "Firmware", family: "Chip", address: "Address", uptime: "Uptime", power: "Power" };
+const issueSizes = [
+  [1287, 900],
+  [1440, 900],
+  [1714, 1366],
+] as const;
+
+/** The drawn width of every visible header cell by its text ("(spare)" for the empty room), and the frame. */
+async function deviceColumns(page: Page) {
+  await deviceFrame(page);
+  return page.evaluate(() => {
+    const t = document.querySelector<HTMLTableElement>('table[data-table="devices"]')!;
+    const f = t.parentElement!;
+    const w: Record<string, number> = {};
+    const order: string[] = [];
+    for (const th of t.tHead!.rows[0].cells) {
+      if (th.offsetParent === null) continue;
+      const name = th.classList.contains("spare") ? "(spare)" : th.textContent!.trim();
+      w[name] = th.getBoundingClientRect().width;
+      order.push(name);
+    }
+    const right = (n: string) => [...t.tHead!.rows[0].cells].find((th) => th.textContent!.trim() === n)!.getBoundingClientRect().right;
+    return { w, order, client: f.clientWidth, scroll: f.scrollWidth, frameRight: f.getBoundingClientRect().right - f.clientLeft, actionsRight: right("Actions") };
+  });
+}
+/** The cells of a column that do not show all of their content: wider than their box (the box cuts them), no tolerance. */
+async function cutCells(page: Page, name: string) {
+  await deviceFrame(page);
+  return page.evaluate((n) => {
+    const t = document.querySelector<HTMLTableElement>('table[data-table="devices"]')!;
+    const th = [...t.tHead!.rows[0].cells].find((h) => h.textContent!.trim() === n)!;
+    let cut = 0,
+      rows = 0;
+    for (const r of t.tBodies[0].rows) {
+      const c = r.cells[th.cellIndex];
+      if (!c || c.colSpan > 1) continue;
+      rows++;
+      const ext = c.querySelector<HTMLElement>("a.ext");
+      if (c.scrollWidth > c.clientWidth || (ext && ext.scrollWidth > ext.clientWidth)) cut++;
+    }
+    return { cut, rows, width: th.getBoundingClientRect().width };
+  }, name);
+}
+/** Double-clicks the resize handle of a column (fit to content) and returns the layout the page saved. */
+async function fitByDoubleClick(page: Page, name: string): Promise<{ w: Record<string, number>; c?: boolean }> {
+  const box = await handleBox(page, name);
+  const done = saved(page, "table.devices");
+  await page.mouse.dblclick(box.x + box.width / 2, box.y + box.height / 2);
+  return (await done).request().postDataJSON();
+}
+async function openDevices(page: Page, layout: unknown, size: readonly [number, number]) {
+  await page.setViewportSize({ width: size[0], height: size[1] });
+  await page.setExtraHTTPHeaders(adam);
+  await page.goto(app.url + "/devices");
+  expect(await postPref(page, "table.devices", layout)).toBe(204);
+  await page.goto(app.url + "/devices");
+  await deviceFrame(page);
+}
+const others = (before: Record<string, number>, after: Record<string, number>, skip: string[]) =>
+  Object.keys(before)
+    .filter((k) => !skip.includes(k))
+    .map((k) => ({ k, d: Math.abs(after[k] - before[k]) }))
+    .filter((x) => x.d > 0.5);
+
+test("#828: a layout saved before 0.36.1 comes back with no cut cell at the owner's window widths", async ({ page }) => {
+  try {
+    for (const size of issueSizes) {
+      await openDevices(page, owner828, size);
+      for (const name of ["Name", "Status", "Wi-Fi", "Firmware", "Chip", "Address", "Uptime"]) {
+        const c = await cutCells(page, name);
+        expect(c.rows).toBeGreaterThan(0);
+        expect(c.cut, `${name} at ${size[0]} px (${c.width.toFixed(1)} px wide)`).toBe(0);
+      }
+      // A frame with room for the whole layout lifts Address and Firmware to their floors and takes nothing
+      // from the other columns: the room they need comes from the spare room, not from Name or Status (the
+      // longest device name wrapped when every column paid its share).
+      if (size[0] === 1714) {
+        const m = await deviceColumns(page);
+        expect(m.w["(spare)"], "the frame has room to spare").toBeGreaterThan(0);
+        for (const [id, w] of Object.entries(owner828.w)) {
+          if (id === "actions") continue;
+          expect(m.w[names828[id]], `${names828[id]} against its stored ${w * 10} px at 1714 px`).toBeGreaterThanOrEqual(w * 10 - 0.5);
+        }
+      }
+    }
+  } finally {
+    await resetAll(page, "/devices", "table.devices");
+  }
+});
+
+test("#828: Power in a layout saved before 0.36.1 comes back as wide as its content, not as a share of the old table", async ({ page }) => {
+  // Power is pinned right: it has no handle and no fit in the device table, so a share of the old stretched
+  // table, stored by the next save, could only be undone by Reset. Stored here at 200 px, about three
+  // times its content.
+  const withPower = { ...owner828, h: ["reach", "restart"], w: { ...owner828.w, power: 20 } };
+  try {
+    await openDevices(page, withPower, [1714, 1366]);
+    const content = async () => {
+      await deviceFrame(page);
+      return page.evaluate(() => {
+        const t = document.querySelector<HTMLTableElement>('table[data-table="devices"]')!;
+        const th = [...t.tHead!.rows[0].cells].find((h) => h.textContent!.trim() === "Power")!;
+        // the width of a cell's content on one line, with its padding; the header also holds room for a handle (12 px), as a fit counts it
+        const need = (cell: HTMLElement, extra: number) => {
+          const r = document.createRange();
+          r.selectNodeContents(cell);
+          const cs = getComputedStyle(cell);
+          return r.getBoundingClientRect().width + parseFloat(cs.paddingLeft) + parseFloat(cs.paddingRight) + extra;
+        };
+        let want = need(th, 12);
+        for (const row of t.tBodies[0].rows) {
+          const td = row.cells[th.cellIndex];
+          if (td && td.colSpan === 1) want = Math.max(want, need(td, 0));
+        }
+        return { want, w: th.getBoundingClientRect().width, handle: !!th.querySelector(".colhandle") };
+      });
+    };
+    const first = await content();
+    expect(first.handle, "Power has no resize handle").toBe(false);
+    expect((await cutCells(page, "Power")).cut, "Power shows all of its content").toBe(0);
+    expect(first.w, `Power (${first.w.toFixed(1)} px) against its content (${first.want.toFixed(1)} px)`).toBeLessThanOrEqual(Math.ceil(first.want) + 1);
+    // the next save stores the width that is drawn, and a reload draws it again
+    const doc = await fitByDoubleClick(page, "Status");
+    expect(doc.c).toBe(true);
+    expect(Math.abs((doc.w.power ?? 0) * 10 - first.w), "the stored width of Power").toBeLessThanOrEqual(1);
+    await page.reload();
+    const after = await content();
+    expect(Math.abs(after.w - first.w), "Power after a reload").toBeLessThanOrEqual(0.5);
+  } finally {
+    await resetAll(page, "/devices", "table.devices");
+  }
+});
+
+test("#828: a layout saved by 0.36.1 (scaled below its content) comes back with no cut cell", async ({ page }) => {
+  // after a fit at 1714 px 0.36.1 stored Address at 86 px for 156 px of content, scaled to the table's floor
+  const scaled = { ...owner828, b: true, w: { name: 17.5, status: 14.2, wifi: 10.1, firmware: 7.8, family: 6.5, address: 8.6, uptime: 8.2, actions: 8.2 } };
+  try {
+    for (const size of [issueSizes[0], issueSizes[2]]) {
+      await openDevices(page, scaled, size);
+      for (const name of ["Firmware", "Chip", "Address", "Uptime"]) expect((await cutCells(page, name)).cut, `${name} at ${size[0]} px`).toBe(0);
+    }
+  } finally {
+    await resetAll(page, "/devices", "table.devices");
+  }
+});
+
+test("#828: a fit makes the column as wide as its content, and it stays so after a reload and at another window width", async ({ page }) => {
+  try {
+    await openDevices(page, owner828, [1714, 1366]);
+    await fitByDoubleClick(page, "Address");
+    expect((await cutCells(page, "Address")).cut, "right after the fit").toBe(0);
+    const fitted = (await cutCells(page, "Address")).width;
+    await page.reload();
+    expect((await cutCells(page, "Address")).cut, "after a reload").toBe(0);
+    expect(Math.abs((await cutCells(page, "Address")).width - fitted), "the fitted width after a reload").toBeLessThanOrEqual(0.5);
+    // the window the release smoke check used
+    await page.setViewportSize({ width: 1287, height: 900 });
+    await page.reload();
+    expect((await cutCells(page, "Address")).cut, "at 1287 px").toBe(0);
+    expect(Math.abs((await cutCells(page, "Address")).width - fitted), "the fitted width at 1287 px").toBeLessThanOrEqual(0.5);
+
+    // 0.36.1 stopped the fit 0.1 px short at 1440 px (155.9 px for 156): the fit leaves no cell cut, with no tolerance
+    await openDevices(page, owner828, [1440, 900]);
+    await fitByDoubleClick(page, "Address");
+    await page.reload();
+    expect((await cutCells(page, "Address")).cut, "fitted at 1440 px, after a reload").toBe(0);
+  } finally {
+    await resetAll(page, "/devices", "table.devices");
+  }
+});
+
+test("#828: a fit changes only its own column; the room it frees stays empty after the last data column", async ({ page }) => {
+  try {
+    await openDevices(page, owner828, [1714, 1366]);
+    const before = await deviceColumns(page);
+    await fitByDoubleClick(page, "Status");
+    const after = await deviceColumns(page);
+    expect(after.w.Status, "Status fitted to its content").toBeLessThan(before.w.Status - 50);
+    expect(others(before.w, after.w, ["Status", "(spare)"]), "the other columns after the fit of Status").toEqual([]);
+    expect(after.w["(spare)"] - before.w["(spare)"], "the room Status gave up is spare room").toBeCloseTo(before.w.Status - after.w.Status, 0);
+  } finally {
+    await resetAll(page, "/devices", "table.devices");
+  }
+});
+
+test("#828: the row menu column fits its button at every window width: no handle, no stretch, never saved", async ({ page }) => {
+  try {
+    for (const size of issueSizes) {
+      await openDevices(page, owner828, size);
+      const m = await page.evaluate(() => {
+        const t = document.querySelector<HTMLTableElement>('table[data-table="devices"]')!;
+        const th = [...t.tHead!.rows[0].cells].find((h) => h.textContent!.trim() === "Actions")!;
+        const td = t.tBodies[0].rows[0].cells[th.cellIndex];
+        const cs = getComputedStyle(td);
+        const button = td.querySelector("summary")!.getBoundingClientRect().width;
+        return { w: th.getBoundingClientRect().width, fits: button + parseFloat(cs.paddingLeft) + parseFloat(cs.paddingRight), handle: !!th.querySelector(".colhandle") };
+      });
+      expect(m.handle, `a resize handle on the row menu at ${size[0]} px`).toBe(false);
+      expect(Math.abs(m.w - m.fits), `the row menu column (${m.w.toFixed(1)} px) against its button and padding (${m.fits.toFixed(1)} px) at ${size[0]} px`).toBeLessThanOrEqual(1);
+    }
+    // a save of any change leaves the row menu out
+    const doc = await fitByDoubleClick(page, "Firmware");
+    expect(Object.keys(doc.w)).not.toContain("actions");
+  } finally {
+    await resetAll(page, "/devices", "table.devices");
+  }
+});
+
+test("#828: the last data column can be narrowed to its content; the room becomes spare room, and widening a column scrolls", async ({ page }) => {
+  try {
+    await openDevices(page, owner828, [1714, 1366]);
+    const before = await deviceColumns(page);
+    const last = before.order.filter((n) => n !== "(spare)" && n !== "Actions" && n !== "Power").pop()!;
+    expect(last).toBe("Uptime");
+    const box = await handleBox(page, "Uptime");
+    const done = saved(page, "table.devices");
+    await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(box.x + box.width / 2 - 20, box.y + box.height / 2, { steps: 4 });
+    await page.mouse.move(box.x + box.width / 2 - 40, box.y + box.height / 2, { steps: 4 });
+    await page.mouse.up();
+    await done;
+    const after = await deviceColumns(page);
+    expect(after.w.Uptime - before.w.Uptime, "Uptime follows the pointer").toBeCloseTo(-40, 0);
+    expect(others(before.w, after.w, ["Uptime", "(spare)"]), "the other columns when Uptime narrows").toEqual([]);
+    expect(after.w["(spare)"] - before.w["(spare)"], "the spare room grows by what Uptime gave up").toBeCloseTo(40, 0);
+    expect((await cutCells(page, "Uptime")).cut, "Uptime is still as wide as its content").toBe(0);
+
+    // widening a column takes nothing from the others: the table grows and scrolls once it is wider than its frame
+    const handle = page.getByRole("separator", { name: "Resize column Firmware" });
+    await handle.focus();
+    const widened = saved(page, "table.devices");
+    for (let i = 0; i < 10; i++) await page.keyboard.press("Shift+ArrowRight");
+    await widened;
+    const wide = await deviceColumns(page);
+    expect(wide.w.Firmware - after.w.Firmware, "Firmware after ten steps of 40 px").toBeCloseTo(400, 0);
+    expect(others(after.w, wide.w, ["Firmware", "(spare)"]), "the other columns when Firmware widens").toEqual([]);
+    expect(wide.scroll, "the table is wider than its frame and scrolls").toBeGreaterThan(wide.client);
+  } finally {
+    await resetAll(page, "/devices", "table.devices");
+  }
+});
+
+test("#828: a saved layout is drawn at its saved widths in any wider frame, the spare room before the columns pinned right", async ({ page }) => {
+  // the layout as this version saves it: content pixels (tenths in w), marked "c"
+  const content = { w: { name: 22, status: 16.5, wifi: 11.5, firmware: 10, family: 9, address: 16, uptime: 9.5, power: 7.5 }, h: ["reach", "restart"], o: owner828.o, c: true };
+  try {
+    for (const size of [issueSizes[1], issueSizes[2]]) {
+      await openDevices(page, content, size);
+      const m = await deviceColumns(page);
+      const names: Record<string, string> = { name: "Name", status: "Status", wifi: "Wi-Fi", firmware: "Firmware", family: "Chip", address: "Address", uptime: "Uptime", power: "Power" };
+      for (const [id, w] of Object.entries(content.w)) expect(m.w[names[id]], `${names[id]} at ${size[0]} px`).toBeCloseTo(w * 10, 0);
+      expect(m.order.slice(-3), "the spare room lies between the last data column and the pinned columns").toEqual(["(spare)", "Power", "Actions"]);
+      expect(m.w["(spare)"], "the frame is wider than the layout").toBeGreaterThan(0);
+      // empty room, not a column: no cell of it shows anything (an empty cell reads "-" in every table, #51)
+      const shown = await page.evaluate(() =>
+        [...document.querySelectorAll('table[data-table="devices"] td.spare')].map((td) => (td.textContent ?? "") + getComputedStyle(td, "::after").content).filter((x) => x !== "none" && x !== "normal" && x !== ""),
+      );
+      expect(shown, "what the spare cells show").toEqual([]);
+      expect(Math.abs(m.actionsRight - m.frameRight), "the row menu sits at the frame's right edge").toBeLessThanOrEqual(1);
+      expect(m.scroll).toBeLessThanOrEqual(m.client);
+    }
   } finally {
     await resetAll(page, "/devices", "table.devices");
   }

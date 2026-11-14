@@ -2471,8 +2471,8 @@ span.error::before {
   font-family: Georgia, serif;
   font-style: italic;
 }
-/* #51 empty cells read "-" in every table */
-td:empty:not(.rowacts):not(.sel)::after {
+/* #51 empty cells read "-" in every table (not the spare room of the device list, #828: no column) */
+td:empty:not(.rowacts):not(.sel):not(.spare)::after {
   content: "-";
   color: var(--color-text-3);
 }
@@ -8530,8 +8530,9 @@ body:has(.bulkbar:not([hidden]) > .bulk-acts) {
   table.devtable col.c-pow {
     width: 72px;
   }
+  /* the row menu: its 36 px button and 6 px of padding either side (#828; tables.js ACT_PX, tableprefs.go menuPx) */
   table.devtable col.c-act {
-    width: 52px;
+    width: 48px;
   }
   table.devtable {
     font-size: 13px;
@@ -8570,6 +8571,12 @@ body:has(.bulkbar:not([hidden]) > .bulk-acts) {
   table.devtable td.dv-name > a:hover {
     color: var(--color-accent-fg);
     text-decoration: underline;
+  }
+  /* #828: the room a frame has beyond the table's columns, empty, before the columns pinned right
+     (tableprefs.go: spareID). Its <col> has no width, so the fixed layout gives it all of that room. */
+  .tablescroll > table.devtable > thead > tr > th.spare,
+  table.devtable > tbody > tr > td.spare {
+    padding: 0;
   }
   /* the row menu opens inside its cell (without JavaScript; tables.js places it fixed) */
   table.devtable > tbody > tr > td.rowacts {

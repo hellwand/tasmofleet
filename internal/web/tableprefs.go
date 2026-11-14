@@ -34,7 +34,8 @@ import (
 // swap (htmx:afterSettle), as it does for the transactions table.
 //
 // Widths are relative weights (percent of the data columns), so a saved layout
-// fits any screen width and never makes the page scroll sideways.
+// fits any screen width and never makes the page scroll sideways. The device
+// list is the exception (pxTables): its widths are pixels.
 
 type colDef struct {
 	ID    string
@@ -63,11 +64,22 @@ type tableDef struct {
 }
 
 // pxTables have pixel default widths (the weights are tenths of them) and scroll sideways when
-// they need more room than the page has (the device list, D19). A saved layout keeps that size:
-// its weights are tenths of the pixels at saving, and the table is at least as wide as their sum
-// (data-basew, applied by tables.js), so widening a column never squeezes the others into the frame.
-// The widths are the layout's own, without the stretch to a wider frame (tablePref.B, #805).
+// they need more room than the page has (the device list, D19). A column of such a table is as wide
+// as the person set it, in pixels of content (tablePref.C, #828), and nothing else: the table is as
+// wide as its columns (data-basew), widening one column takes nothing from the others, and a frame
+// wider than the table keeps the room it has spare in an empty cell before the columns pinned right
+// (spareID). The row menu column (fixed right) is as wide as its button (menuPx) and has no saved width.
 var pxTables = map[string]bool{"devices": true}
+
+// spareID names the empty column of a pixel table (in data-cols, for tables.js): the room a frame has
+// beyond the table's own width. It is no column of the registry.
+const spareID = "~"
+
+// fixedWidth says whether a column of table key has a width of its own that no layout sets: the row
+// menu of a pixel table, as wide as its button.
+func fixedWidth(key string, cd colDef) bool {
+	return pxTables[key] && cd.Fixed && cd.Side == sideRight
+}
 
 func c(id, label string, w float64) colDef { return colDef{ID: id, Label: label, Weight: w} }
 func lk(id, label string, w float64) colDef {
@@ -124,20 +136,16 @@ const (
 	maxWeight    = 90.0
 	maxPrefBytes = 4096
 	selectShare  = 3.5 // percent of the table for a leading checkbox column
-	// selectPx is that column of a table with pixel widths at its narrowest: the width of its
-	// checkbox, which tables.js (fitPinned) gives it while selectShare of the table is less.
+	// selectPx is that column of a table with pixel widths: the width of its checkbox (#805).
 	selectPx = 43
+	// menuPx is the row menu column of a table with pixel widths: its 36 px button and 6 px of
+	// padding on either side (#828). tables.js and app.css have the same number.
+	menuPx = 48
 )
 
-// tableWidth is the width a table with pixel widths needs for data pixels of data columns: with a
-// checkbox column, that column as the browser draws it, selectShare of the table but never narrower
-// than selectPx. A fixed 44 px made a table that fitted its frame 1 px too wide after a reload, and
-// gave a wide table's data columns less than saved (#805). tables.js has the same function.
-func tableWidth(data float64, sel bool) float64 {
-	if !sel {
-		return data
-	}
-	return math.Max(data+selectPx, data/(1-selectShare/100))
+// pxWidth formats a stored width (tenths of pixels) as the pixels of a <col width>.
+func pxWidth(w float64) string {
+	return strconv.FormatFloat(math.Round(w*10), 'f', -1, 64)
 }
 
 // tablePref is the stored layout of one table.
@@ -150,18 +158,18 @@ type tablePref struct {
 	// "right" or "none" (D19). A layout saved before pinning existed has no P and reads as
 	// the defaults (devices: Name left, Power and Actions right).
 	P map[string]string `json:"p,omitempty"`
-	// B: W holds the layout's own pixel widths of a pxTable, saved without the stretch to a wider
-	// frame (#805). Before 0.36.1 a save stored the widths the browser drew, stretched to the frame,
-	// so a layout without B has widths nobody chose (showing three columns made the maintainer's
-	// layout 1977 px wide in a 1574 px frame). Its proportions are kept and its total is not: it is
-	// laid out as shares without a minimum width of its own (fitted to the window down to the
-	// scroll floor of tables.js), and its next save stores the widths with B. No migration: the
-	// stored rows stay as they are until then.
+	// B: W holds the widths of a pxTable as 0.36.1 saved them (#805): the drawn widths scaled to the
+	// table's scroll floor, often narrower than their content (Address 86 px for 156 px, #828).
+	// Before 0.36.1 a save stored the widths the browser drew, stretched to the frame, so a layout
+	// without B or C has widths nobody chose. Only the browser knows the content widths: such a
+	// layout is marked for tables.js (data-legacy), which lays it out with no column narrower than
+	// its content, and its next save stores the widths with C. No migration: the stored rows stay as
+	// they are until then.
 	B bool `json:"b,omitempty"`
+	// C: W holds the content widths of a pxTable (#828), drawn as they are: never stretched to a
+	// wider frame, never scaled. The row menu has no width in it.
+	C bool `json:"c,omitempty"`
 }
-
-// ownWidths says whether the layout's widths have a size (B), not only proportions.
-func (p tablePref) ownWidths() bool { return p.B || len(p.W) == 0 }
 
 func (p tablePref) empty() bool {
 	return len(p.W) == 0 && len(p.H) == 0 && len(p.V) == 0 && len(p.O) == 0 && len(p.P) == 0
@@ -284,6 +292,9 @@ func validatePref(key string, raw []byte) (string, error) {
 			if math.IsNaN(w) || math.IsInf(w, 0) {
 				return "", fmt.Errorf("%w: width of %q", errPref, id)
 			}
+			if cd, _ := def.col(id); fixedWidth(def.Key, cd) {
+				continue // the row menu fits its button; an open page of an older version still sends it
+			}
 			if clean.W == nil {
 				clean.W = map[string]float64{}
 			}
@@ -346,7 +357,9 @@ func validatePref(key string, raw []byte) (string, error) {
 		if slices.Equal(clean.O, defaultOrder(def)) {
 			clean.O = nil // the default order needs no storage
 		}
-		clean.B = p.B && pxTables[def.Key] && len(clean.W) > 0 // only widths of a pixel table have a size
+		// only widths of a pixel table have a size; content widths replace the ones 0.36.1 saved
+		clean.C = p.C && pxTables[def.Key] && len(clean.W) > 0
+		clean.B = !clean.C && p.B && pxTables[def.Key] && len(clean.W) > 0
 		if clean.empty() {
 			return "", nil
 		}
@@ -670,7 +683,7 @@ func decorateHeaders(key, lead string, cols []colDef, tag, body string, empty bo
 				}
 				return th
 			}
-			if n >= len(cols) || cols[n].ID == "" {
+			if n >= len(cols) || cols[n].ID == "" || cols[n].ID == spareID {
 				return th
 			}
 			cd := cols[n]
@@ -694,6 +707,38 @@ func decorateHeaders(key, lead string, cols []colDef, tag, body string, empty bo
 }
 
 var colRe = regexp.MustCompile(`<col\b[^>]*>`)
+
+// insertCol puts tag before the n-th <col> (0-based) of the first colgroup, or at its end.
+func insertCol(body string, n int, tag string) string {
+	loc := colgroupRe.FindStringIndex(body)
+	if loc == nil {
+		return body
+	}
+	g := body[loc[0]:loc[1]]
+	at := len(g) - len("</colgroup>")
+	if cs := colRe.FindAllStringIndex(g, -1); n < len(cs) {
+		at = cs[n][0]
+	}
+	return body[:loc[0]] + g[:at] + tag + g[at:] + body[loc[1]:]
+}
+
+// insertSpare gives every row of n cells (header and body) the empty cell of a pixel table at place at
+// (#828): the room a frame has beyond the table's own width. A row with another number of cells (an
+// empty-state row, a detail row spanning columns) is left alone, as permuteCells does.
+func insertSpare(body string, at, n int) string {
+	return trRe.ReplaceAllStringFunc(body, func(row string) string {
+		m := trRe.FindStringSubmatch(row)
+		cells := cellRe.FindAllString(m[2], -1)
+		if len(cells) != n || strings.Contains(m[2], "colspan=") {
+			return row
+		}
+		cell := `<td class="spare" aria-hidden="true"></td>`
+		if strings.HasPrefix(cells[0], "<th") {
+			cell = `<th class="spare" aria-hidden="true"></th>`
+		}
+		return m[1] + strings.Join(slices.Insert(cells, at, cell), "") + "</tr>"
+	})
+}
 
 // dropCol removes the n-th <col> (0-based) of the first colgroup.
 func dropCol(body string, n int) string {
@@ -750,14 +795,33 @@ func rewriteTable(key, tag, body string, prefs map[string]string, sorts map[stri
 		cols = moved
 		body = permuteCells(body, perm)
 	}
+	px := pxTables[key]
+	spareAt := -1 // the empty cell of a pixel table: before the columns pinned right (#828)
+	if px && len(cols) < maxHideClasses {
+		spareAt = len(cols)
+		for i, cd := range cols {
+			if cd.ID != "" && pref.side(cd) == sideRight {
+				spareAt = i
+				break
+			}
+		}
+		body = insertSpare(body, spareAt, len(cols))
+		cols = slices.Insert(slices.Clone(cols), spareAt, colDef{ID: spareID})
+	}
 
 	classes := []string{}
-	ids := make([]string, len(cols)) // "id:default weight[:off][:l|:r][:fix]" for the script; "" for a checkbox column
+	ids := make([]string, len(cols)) // "id:default weight[:off][:l|:r][:fix]" for the script; "" for a checkbox column, spareID for the spare one
 	var colgroup strings.Builder
 	fixed, total := 0.0, 0.0
+	// a pixel table: the pixels of its data columns, and how many row menus it has (menuPx each)
+	dataPx, menus, ownWidths := 0.0, 0, pref.C
 	custom := reordered // the static <colgroup> follows the default order
 	dropped := []int{}  // default-off columns that stay off: their <col> goes
 	for i, cd := range cols {
+		if cd.ID == spareID {
+			ids[i] = spareID
+			continue
+		}
 		if cd.ID == "" {
 			// the selection column is always pinned left: its checkbox stays with the row
 			classes = append(classes, "pl"+strconv.Itoa(i+1))
@@ -793,9 +857,21 @@ func rewriteTable(key, tag, body string, prefs map[string]string, sorts map[stri
 			classes = append(classes, "pr"+strconv.Itoa(i+1))
 		}
 		total += colWeight(cd, pref)
+		if fixedWidth(key, cd) {
+			menus++
+			continue // no layout sets its width
+		}
+		dataPx += math.Round(colWeight(cd, pref) * 10)
 		if _, set := pref.W[cd.ID]; set || cd.Off {
 			custom = true
 		}
+	}
+	if !pref.C {
+		// widths saved before #828 are no content widths; without any, the layout has the default widths
+		ownWidths = !slices.ContainsFunc(cols, func(cd colDef) bool {
+			_, set := pref.W[cd.ID]
+			return set && !fixedWidth(key, cd)
+		})
 	}
 	var orderIDs []string
 	for _, i := range order {
@@ -807,10 +883,18 @@ func rewriteTable(key, tag, body string, prefs map[string]string, sorts map[stri
 		colgroup.WriteString("<colgroup>")
 		for _, cd := range cols {
 			switch {
+			case cd.ID == spareID:
+				colgroup.WriteString(`<col class="spare">`) // no width: it takes what the frame has beyond the columns
+			case cd.ID == "" && px:
+				colgroup.WriteString(`<col width="` + strconv.Itoa(selectPx) + `">`)
 			case cd.ID == "":
 				colgroup.WriteString(`<col width="` + pct(selectShare) + `">`)
 			case pref.hidden(cd):
 				// no <col>: a hidden cell takes no column
+			case fixedWidth(key, cd):
+				colgroup.WriteString(`<col data-id="` + cd.ID + `" width="` + strconv.Itoa(menuPx) + `">`)
+			case px:
+				colgroup.WriteString(`<col data-id="` + cd.ID + `" width="` + pxWidth(colWeight(cd, pref)) + `">`)
 			default:
 				colgroup.WriteString(`<col data-id="` + cd.ID + `" width="` + pct(colWeight(cd, pref)/total*(100-fixed)) + `">`)
 			}
@@ -818,8 +902,20 @@ func rewriteTable(key, tag, body string, prefs map[string]string, sorts map[stri
 		colgroup.WriteString("</colgroup>")
 		body = colgroupRe.ReplaceAllString(body, "")
 	} else {
+		// the static <colgroup> has no <col> for the spare cell: the dropped columns go first (their
+		// places do not count it), then it gets one where its cells are
+		before := 0
 		for k := len(dropped) - 1; k >= 0; k-- {
-			body = dropCol(body, dropped[k])
+			at := dropped[k]
+			if spareAt >= 0 && at > spareAt {
+				at--
+			} else if spareAt >= 0 {
+				before++
+			}
+			body = dropCol(body, at)
+		}
+		if spareAt >= 0 {
+			body = insertCol(body, spareAt-before, `<col class="spare">`)
 		}
 	}
 	// A table whose template names no sort gets the page's own (tablesort.go: pageSorts).
@@ -834,10 +930,20 @@ func rewriteTable(key, tag, body string, prefs map[string]string, sorts map[stri
 	body = decorateHeaders(key, lead, cols, tag, body, empty)
 
 	attrs := ` data-cols="` + strings.Join(ids, ",") + `" data-order="` + strings.Join(orderIDs, ",") + `"`
-	if pxTables[key] {
+	if px {
 		attrs += ` data-px`
-		if custom && pref.ownWidths() {
-			attrs += ` data-basew="` + strconv.Itoa(int(math.Round(tableWidth(total*10, fixed > 0)))) + `"`
+		switch {
+		case custom && ownWidths:
+			// the table's own width: the selection column at its checkbox, the data columns, the row menus
+			w := dataPx + float64(menus*menuPx)
+			if fixed > 0 {
+				w += selectPx
+			}
+			attrs += ` data-basew="` + strconv.Itoa(int(w)) + `"`
+		case custom && pref.B:
+			attrs += ` data-legacy="px"` // 0.36.1: the layout's pixels, scaled below their content (#828)
+		case custom:
+			attrs += ` data-legacy="shares"` // before 0.36.1: widths stretched to a frame (#805)
 		}
 	}
 	if lead != key {
