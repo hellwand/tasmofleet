@@ -173,7 +173,9 @@ func TestFailsOverToMQTTOnlyWhenNothingWasSent(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			g := newRig(t)
 			g.http.err = tc.err
-			// a write: reads go MQTT first since #456, so only writes still start on HTTP
+			// a write that starts on HTTP: reads go MQTT first since #456, writes since #605 unless the device's
+			// MQTT reads went unanswered
+			g.r.unanswered.Fail(7, HTTPFailUnreachable)
 			raw, err := g.r.Command(t.Context(), g.target(), "Power1 ON")
 			if tc.failover {
 				if err != nil || string(raw) != `{"MQTT":"yes"}` || g.mq.n() != 1 || g.http.n() != 1 {
@@ -196,6 +198,8 @@ func TestRefusedConnectionIsOneMQTTSend(t *testing.T) {
 	cl := tasmota.NewHTTPClient(tasmota.Options{AllowedNetworks: loopback()})
 	g.r = NewRouter(Options{HTTP: cl, Devices: g.devs, Facts: g.f, Memory: g.mem})
 	g.r.SetMQTT(g.mq)
+	g.f.unanswered = g.r.unanswered
+	g.r.unanswered.Fail(7, HTTPFailUnreachable) // the write starts on HTTP (#605: else it would go MQTT first)
 	ctx, tr := WithTrace(t.Context())
 	if _, err := g.r.Command(ctx, g.target(), "Power1 ON"); err != nil {
 		t.Fatal(err)
@@ -546,6 +550,7 @@ func TestAPIRefusedFailsOverOnlyForReadsOrAKnownRefusal(t *testing.T) {
 	// already knows to refuse the API.
 	g := newRig(t)
 	g.http.err = tasmota.ErrHTTPAPIRefused
+	g.r.unanswered.Fail(7, HTTPFailUnreachable) // the write starts on HTTP (#605: else it would go MQTT first)
 	if _, err := g.r.Command(t.Context(), g.target(), "Power1 TOGGLE"); !errors.Is(err, tasmota.ErrHTTPAPIRefused) || g.mq.n() != 0 {
 		t.Fatalf("first-try write: err=%v mqtt=%d", err, g.mq.n())
 	}

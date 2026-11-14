@@ -3,11 +3,14 @@ package policy
 import (
 	"fmt"
 	"regexp"
+	"strconv"
 	"strings"
+	"sync"
 
 	"github.com/hellwand/tasmofleet/internal/cmdpolicy"
 	"github.com/hellwand/tasmofleet/internal/model"
 	"github.com/hellwand/tasmofleet/internal/settings"
+	"github.com/hellwand/tasmofleet/internal/tasmotacmd"
 )
 
 // "Make compliant" turns findings into the commands that remove the
@@ -55,9 +58,12 @@ func (p FixPlan) Lines() []string {
 	return out
 }
 
-var setOptionRe = regexp.MustCompile(`^SetOption[0-9]{1,3}$`)
+// A SetOption's index and value are plain decimals. Tasmota reads the index with atoi (SetOption003 is SetOption3,
+// which deviceName names) and the value with strtol base 0, so a leading 0 in the value is octal there ("08" is 0)
+// while Atoi reads 8 (#606).
+var setOptionRe = regexp.MustCompile(`^SetOption(0|[1-9][0-9]{0,2})$`)
 
-var setOptionValueRe = regexp.MustCompile(`^[0-9]{1,5}$`)
+var setOptionValueRe = regexp.MustCompile(`^(0|[1-9][0-9]{0,4})$`)
 
 // CommandText is the command that sets a rule's setting to want. The settings
 // the editor knows are set with the editor's validation; a SetOption takes a
@@ -66,8 +72,8 @@ var setOptionValueRe = regexp.MustCompile(`^[0-9]{1,5}$`)
 // nothing that asks in the console is ever sent from a rule.
 func CommandText(command, want string) (string, error) {
 	want = canon(want)
-	if canonName, curated := settings.Curated(command); curated && canonName != command {
-		return "", fmt.Errorf("%s: write the setting as %s", command, canonName)
+	if name := deviceName(command); name != command {
+		return "", fmt.Errorf("%s: write the setting as %s", command, name)
 	}
 	if f, ok := settings.Lookup(command); ok {
 		if f.Secret {
@@ -87,6 +93,56 @@ func CommandText(command, want string) (string, error) {
 		return command + " " + want, nil
 	}
 	return genericText(command, want)
+}
+
+// deviceName is the name of the setting Tasmota runs for command when policy knows that setting, command itself
+// otherwise. Tasmota matches a name in any letter case, reads the digits at its end as the index and runs the
+// command without them (support_command.ino:417-424), reads a SetOption's index as a number (SetOption003 is
+// SetOption3), and runs a SetOption synonym as its SetOption (MqttTLS is SetOption103). A rule or a line must use
+// the name returned: under any other spelling it would pass as a generic rule, without the setting's validation
+// and without what policy knows about it (settings.RestartsDevice, and cmdpolicy's cut-off check), so Make
+// compliant would send a line that restarts the device, or cuts it off from MQTT, among the first chunks with a
+// save after it (#606). FriendlyName1 and NtpServer2 are settings of their own; their names are left alone.
+func deviceName(command string) string {
+	const so = "SetOption"
+	if len(command) > len(so) && strings.EqualFold(command[:len(so)], so) {
+		if n, err := strconv.Atoi(command[len(so):]); err == nil && n >= 0 {
+			return so + strconv.Itoa(n)
+		}
+	}
+	if name, ok := settings.Curated(command); ok {
+		return name
+	}
+	base := strings.TrimRight(command, "0123456789")
+	if name, ok := settings.Curated(base); ok {
+		return name
+	}
+	if name, ok := setOptionSynonyms()[strings.ToLower(base)]; ok {
+		return name
+	}
+	return command
+}
+
+// setOptionSynonyms maps the lower-case name of every SetOption synonym of the pinned Tasmota catalogues to its
+// SetOption.
+var setOptionSynonyms = sync.OnceValue(func() map[string]string { return synonymTable(tasmotacmd.Pinned()) })
+
+// synonymTable is setOptionSynonyms from the catalogues set. It panics on a damaged embedded catalogue, like
+// tasmotacmd.GPIO (tasmotacmd's tests catch that): a catalogue that cannot be read must never read as "no synonyms".
+func synonymTable(set *tasmotacmd.Set, err error) map[string]string {
+	if err != nil {
+		panic("policy: the embedded Tasmota catalogues: " + err.Error())
+	}
+	out := map[string]string{}
+	for _, v := range set.Versions() {
+		cat, _, _ := set.For(v)
+		for _, c := range cat.Commands {
+			if strings.HasPrefix(c.SynonymOf, "SetOption") {
+				out[strings.ToLower(c.Command)] = c.SynonymOf
+			}
+		}
+	}
+	return out
 }
 
 // genericText is the set command of a generic rule.

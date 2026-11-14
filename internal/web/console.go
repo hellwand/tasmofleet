@@ -7,7 +7,6 @@ import (
 	"errors"
 	"net/http"
 	"strconv"
-	"strings"
 	"time"
 
 	"github.com/hellwand/tasmofleet/internal/auth"
@@ -130,8 +129,9 @@ func (h *handler) renderConsole(w http.ResponseWriter, r *http.Request, status i
 	data.Tabs = h.tabsOf(r, v, d, "console")
 	since := r.FormValue("since")
 	now := h.d.Clock.Now()
+	f, paths, pathsOK := h.transportOf(r.Context(), d.ID)
 	c := ui.ConsoleData{
-		Title:  "Console · HTTP · " + data.Tabs.Address,
+		Title:  "Console · " + consoleVia(f, paths, pathsOK) + " · " + data.Tabs.Address,
 		Action: v.Base + devPath(d.ID, "/console"), CSRF: v.CSRF, Input: data.Input,
 		ClearHref:  v.Base + devPath(d.ID, "/console?since="+strconv.FormatInt(now.Unix(), 10)),
 		HistoryAdd: data.HistoryAdd,
@@ -150,6 +150,19 @@ func (h *handler) consolePage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	h.renderConsole(w, r, http.StatusOK, d, consoleData{})
+}
+
+// consoleVia names the transports the console's commands take, for its title: MQTT when reads or changes go over
+// MQTT and HTTP is failing, "MQTT + HTTP" when they go MQTT first while HTTP works (HTTP carries what MQTT cannot,
+// and what stays HTTP first), else HTTP (#605).
+func consoleVia(f transport.Facts, p transport.Paths, ok bool) string {
+	switch {
+	case !ok || (p.Commands != transport.MQTT && p.Writes != transport.MQTT):
+		return "HTTP"
+	case f.HTTP.State == transport.HTTPFailing:
+		return "MQTT"
+	}
+	return "MQTT + HTTP"
 }
 
 // consoleError maps service errors to a status and a sentence. Device output
@@ -296,12 +309,13 @@ func (h *handler) consoleSend(w http.ResponseWriter, r *http.Request) {
 }
 
 // historyText is the form of cmd the browser may keep in its command history, or "" for none. It
-// is the same rule the audit log uses (cmdpolicy.Redacted): a command whose logged form differs
-// from what was sent holds, or may hold, a secret and is not kept. A line that already shows the
-// mask is a redacted one (the bulk result page only has those).
+// is the same rule the audit log uses (cmdpolicy.ShownInFull): a command whose logged form hides
+// or masks anything holds, or may hold, a secret and is not kept. A line that already shows the
+// mask is a redacted one (the bulk result page only has those). The transport keeps the same
+// commands HTTP first while HTTP works (#605).
 func historyText(cmd string) string {
 	canon, err := cmdpolicy.Canonical(cmd)
-	if err != nil || canon == "" || cmdpolicy.Redacted(cmd) != canon || strings.Contains(canon, "***") {
+	if err != nil || canon == "" || !cmdpolicy.ShownInFull(cmd) {
 		return ""
 	}
 	return canon

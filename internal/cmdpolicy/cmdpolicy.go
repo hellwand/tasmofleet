@@ -96,12 +96,16 @@ var DefaultOperator = []string{
 	"State", "Time", "Uptime", "Restart 1",
 }
 
-// secretNames carry credentials or network names in their arguments. Admins
-// may send them (after a confirmation); their arguments are never logged.
+// secretNames carry credentials, keys or network names in their arguments. Admins
+// may send them (after a confirmation); their arguments are never logged, and the
+// transport keeps them HTTP first while HTTP works (#605). MI32Key and MI32Keys set
+// BLE sensor bind keys, ZbConfig the Zigbee network key (its reply shows the key, also
+// when sent bare), WiFiTest tries and may store a Wi-Fi name and password ("ssid+pw").
 var secretNames = map[string]bool{
 	"password": true, "webpassword": true, "mqttpassword": true, "ssid": true,
 	"tmtoken": true, "ifxpassword": true, "ifxtoken": true, "ifxuser": true,
-	"tlskey": true, "lorawanappkey": true,
+	"tlskey": true, "lorawanappkey": true, "rgxpassword": true, "rgxssid": true,
+	"mi32key": true, "mi32keys": true, "zbconfig": true, "wifitest": true,
 }
 
 // Consequences shown on the confirmation step.
@@ -114,6 +118,8 @@ const (
 	whyCutOff   = "Changing the address or network settings can leave the device unreachable at the address tasmofleet uses."
 	whyModule   = "Changing the module or template changes the pin mapping; the device may restart or stop working until it is corrected."
 	whyCredCmd  = "Changing a login or the Wi-Fi name can lock tasmofleet out or take the device off the network; tasmofleet does not store the new value."
+	whyBindKey  = "This sets or removes a BLE sensor's bind key; with a wrong key the device can no longer read that sensor. tasmofleet does not store the new value."
+	whyZigbee   = "A changed Zigbee network setting saves and restarts the device, and a new network key or channel can drop the paired Zigbee devices; tasmofleet does not store the new value."
 	whyRestart  = "Restart other than 1 halts the device or erases settings; it may stay down until power is cycled."
 	whyMQTTOnly = "this device is reached over MQTT only; this change can cut TasmoFleet off from it"
 	whyFile     = "TasmoFleet's own code handles file transfers; the command carries the device's MQTT password."
@@ -450,6 +456,14 @@ func confirmFor(p parsed) string {
 		if p.args != "" {
 			return whyModule
 		}
+	case "mi32key", "mi32keys": // secret keys, but no login: their own consequence
+		if p.args != "" {
+			return whyBindKey
+		}
+	case "zbconfig":
+		if p.args != "" {
+			return whyZigbee
+		}
 	default:
 		if secretNames[p.base] && p.args != "" {
 			return whyCredCmd
@@ -647,6 +661,31 @@ func Redacted(cmd string) string {
 	}
 	p.args = scrubText(p.args)
 	return p.canonical()
+}
+
+// ShownInFull reports whether Redacted shows cmd exactly as it is sent: it parses, nothing is hidden or masked,
+// and a Backlog shows every part unchanged (judged part by part, so "Backlog A;B" counts as shown). It is the
+// fail-closed rule for "may hold a secret" of what a person types: the console history and bulk's input echo
+// keep only such commands, and the transport keeps every other console or bulk write HTTP first while HTTP
+// works (#605). Since Redacted is an allowlist, a command it does not know counts as secret.
+func ShownInFull(cmd string) bool {
+	p, bad := parse(cmd)
+	if bad != "" {
+		return false
+	}
+	if p.base != "backlog" || p.args == "" {
+		c := p.canonical()
+		return Redacted(cmd) == c && !strings.Contains(c, mask)
+	}
+	if _, bad := classify(p); bad != "" {
+		return false
+	}
+	for _, part := range strings.Split(p.args, ";") {
+		if part = strings.TrimSpace(part); part != "" && !ShownInFull(part) {
+			return false
+		}
+	}
+	return true
 }
 
 // Canonical is the exact text that is classified and, if allowed, sent: the

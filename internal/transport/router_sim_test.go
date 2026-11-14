@@ -111,13 +111,13 @@ func TestSimDeviceHTTPCannotReachIsManagedOverMQTT(t *testing.T) {
 }
 
 func TestSimStatus0CannotBePublishedByAnExecutor(t *testing.T) {
-	// Why (safety rule 2): Json {"Status":0}, Publish, Rule and WebSend each run a Status 0 on the
+	// Why (safety rule 2): Json {"Status":0}, Publish, Rule, If and WebSend each run a Status 0 on the
 	// device; over MQTT the console must not be a way around the channel's refusal.
 	g := newSimRig(t, simulator.Fault{Kind: simulator.FaultHTTPUnreachable})
 	g.mem.Fail(7, HTTPFailUnreachable)
 	before := len(g.dev.Commands())
 	for _, c := range []string{`Json {"Status":0}`, "Publish cmnd/" + g.dev.Topic() + "/Status 0", `Rule1 ON System#Boot DO Status 0 ENDON`,
-		"WebSend [127.0.0.1] Status 0", "Backlog Power ON; Json {\"Status\":0}", "Status 0", "Backlog Status 0"} {
+		"WebSend [127.0.0.1] Status 0", "Backlog Power ON; Json {\"Status\":0}", "Status 0", "Backlog Status 0", "If (1==1) Status 0"} {
 		_, err := g.r.Command(WithConsole(t.Context()), g.target(), c)
 		if !errors.Is(err, mqttcmd.ErrRefused) {
 			t.Errorf("%q: err = %v, want a refusal", c, err)
@@ -231,6 +231,30 @@ func TestSimBareSwitchModeIsReadOverMQTTUnderItsIndex(t *testing.T) {
 		raw, err := g.r.Command(ctx, g.target(), cmd)
 		if err != nil || string(raw) != want || tr.Via() != "mqtt" {
 			t.Errorf("%s: %s, %v, via %s; want %s over MQTT only", cmd, raw, err, tr.Via(), want)
+		}
+	}
+}
+
+// Why (#605): with HTTP working too, the settings page's writes, Make compliant's SaveData, a switch and Restart
+// go over MQTT first to a real command channel and a simulated device: each is answered over MQTT (no wait for the
+// reply timeout, which would leave the change an unknown outcome), reaches the device exactly once, and the trace
+// (the audit's "via") says MQTT. A Template with a template stays on HTTP.
+func TestSimWritesGoOverMQTTFirstWhileHTTPWorks(t *testing.T) {
+	g := newSimRig(t)
+	for _, c := range []string{"TelePeriod 60", "PowerOnState 1", "SetOption19 1", "Timezone 99", "TimeDst 0,0,3,1,2,120",
+		"SaveData 0", "Power1 ON", "Backlog PowerOnState 2; SaveData 1", "Restart 1"} {
+		before := len(g.dev.Commands())
+		ctx, tr := WithTrace(t.Context())
+		start := time.Now()
+		raw, err := g.r.Command(ctx, g.target(), c)
+		if err != nil || tr.Via() != "mqtt" {
+			t.Fatalf("%q: %s, %v, via %s", c, raw, err, tr.Via())
+		}
+		if d := time.Since(start); d > 3*time.Second {
+			t.Errorf("%q took %v: it waited for the reply timeout", c, d)
+		}
+		if n := len(g.dev.Commands()) - before; n != 1 {
+			t.Errorf("%q reached the device %d times, want once: %v", c, n, g.dev.Commands()[before:])
 		}
 	}
 }

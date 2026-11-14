@@ -22,6 +22,8 @@ func (a *runtime) policyApplier() ota.PolicyApplier {
 }
 
 func (p policyApplier) Apply(ctx context.Context, d model.Device, lines []string) error {
+	// The chunks follow the router's write path like any other write (#606): MQTT first for a device usable there
+	// under the strict rule, a chunk with a line that can cut the device off from MQTT over HTTP while HTTP works.
 	err := p.a.fixer.Apply(ctx, d, lines)
 	p.a.settingsWritten(d.ID) // whatever was sent: a read that started before it holds the old values (#662)
 	if err == nil && p.a.brokerHost != nil && slices.ContainsFunc(lines, setsBrokerTarget) {

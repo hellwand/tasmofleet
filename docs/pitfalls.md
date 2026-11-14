@@ -202,6 +202,19 @@ means nothing stops you: you have to know it. The full working rules are in
 - **Enforced:** the `lint` job runs the check targets; adding a target to it is
   convention.
 
+## Devices and transport
+
+### A second MQTT path that skipped the router's checks (#605)
+
+- **Happened:** the power toggle published `Power<n>` over MQTT by itself whenever the device was on our
+  broker and the bus was up. It never asked whether the topic was the device's own (exclusive, its GroupTopic
+  read), which every other change over MQTT has to pass, so a switch could reach the devices of a shared topic.
+- **Rule:** a call that talks to the command channel itself asks the router's write rule (`transport.Choose`'s
+  writes path, injected by the app), never a copy of it; a write MQTT published and nobody answered is never
+  resent, and only a write MQTT provably did not publish goes over HTTP.
+- **Enforced:** `TestPowerAsksTheRoutersWriteRule`, `TestPowerFollowsTheStrictWriteRule`,
+  `TestRouterWritesFollowChoose` (claims T2, T3 and T11 of `docs/security/mqtt-transport.md`); otherwise convention.
+
 ## Tests
 
 ### A test that depended on the time of day (#340)
