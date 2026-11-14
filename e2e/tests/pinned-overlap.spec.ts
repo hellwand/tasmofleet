@@ -422,6 +422,9 @@ for (const width of [1280, 1440]) {
       // lands while a person holds a handle. Until #806 the new table came with the saved widths and the
       // column jumped back to them until the pointer moved again (this test failed whenever a reload landed
       // in the second after the last move). The reload is forced here, so that case is always checked.
+      // The settle that ends the wait is the one of a swap seen here (the same request): a device event's
+      // reload swapped in just before this script ran settles 20 ms later, after the table was read as
+      // "before", and ending on that settle measured no reload at all (#819).
       const swap = await page.evaluate(
         (i) =>
           new Promise<{ replaced: boolean; swapped: number; settled: number }>((done) => {
@@ -431,11 +434,15 @@ for (const width of [1280, 1440]) {
             };
             const before = document.querySelector("table[data-table=devices]");
             let swapped = -1;
+            let request: unknown = null;
             const onSwap = (e: Event) => {
-              if ((e.target as Element).id === "devtable") swapped = width(); // the first frame drawn after the swap
+              if ((e.target as Element).id !== "devtable") return;
+              request = (e as CustomEvent<{ xhr: XMLHttpRequest }>).detail.xhr;
+              swapped = width(); // the first frame drawn after the swap
             };
             const onSettle = (e: Event) => {
               if ((e.target as Element).id !== "devtable") return;
+              if (request === null || (e as CustomEvent<{ xhr: XMLHttpRequest }>).detail.xhr !== request) return;
               document.removeEventListener("htmx:afterSwap", onSwap);
               document.removeEventListener("htmx:afterSettle", onSettle);
               done({ replaced: document.querySelector("table[data-table=devices]") !== before, swapped, settled: width() });

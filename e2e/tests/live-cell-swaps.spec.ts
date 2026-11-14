@@ -274,8 +274,18 @@ async function framesAcrossReload(page: Page, act: () => Promise<void>): Promise
       if (!w.__done) requestAnimationFrame(sample);
     };
     requestAnimationFrame(sample);
+    // Only the settle of a swap that came after the first recorded frame ends the recording: a reload swapped
+    // in just before the recording started settles 20 ms later, and ending on that settle stopped the
+    // recording before the asked-for reload (#819).
+    let request: unknown = null;
+    document.addEventListener("htmx:afterSwap", function swapped(e) {
+      if ((e.target as Element).id !== "devtable" || w.__frames.length === 0) return;
+      document.removeEventListener("htmx:afterSwap", swapped);
+      request = (e as CustomEvent<{ xhr: XMLHttpRequest }>).detail.xhr;
+    });
     document.addEventListener("htmx:afterSettle", function settled(e) {
       if ((e.target as Element).id !== "devtable") return;
+      if (request === null || (e as CustomEvent<{ xhr: XMLHttpRequest }>).detail.xhr !== request) return;
       document.removeEventListener("htmx:afterSettle", settled);
       setTimeout(() => (w.__done = true), 300);
     });
