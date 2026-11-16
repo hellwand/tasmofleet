@@ -172,6 +172,7 @@ type Deps struct {
 	// (zero: never); optional, without it the page cannot say so.
 	SnapshotMissed func(ctx context.Context) (time.Time, error)
 	Notify         NotifyService      // optional: status lines and test buttons of the Notifications tab (needs SysConfig)
+	Push           PushService        // optional: Web Push key, subscribe and unsubscribe (#610)
 	PolicyRules    PolicyRulesService // the policy rules; required whenever Policy is set
 	// PolicyLivePause is optional: Pause / Resume of the automatic policy live check.
 	PolicyLivePause PolicyLivePause
@@ -346,6 +347,7 @@ func Handler(d Deps) (http.Handler, error) {
 	}
 	h.registerSettings(route, adm)
 	h.registerSysConfig(route, adm)
+	h.registerPush(route, adm)
 	h.registerFleetBackups(route, op, adm)
 	h.registerSetup(route, adm)
 	h.registerPolicy(route, op)
